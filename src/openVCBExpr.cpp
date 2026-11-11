@@ -46,12 +46,12 @@ long long parser::eval_expr(char* exp) {
 	exp_ptr = exp;
 	get_token();
 	if (!*token) {
-		strcpy_s(errormsg, "empty"); // no expression present
+		strcpy(errormsg, "empty"); // no expression present
 		return 0;
 	}
 	eval_expr1(result);
 	if (*token) // last token must be null
-		strcpy_s(errormsg, "syntax error");
+		strcpy(errormsg, "syntax error");
 	return result;
 }
 
@@ -170,7 +170,7 @@ void parser::eval_expr8(long long& result) {
 		get_token();
 		eval_expr1(result);
 		if (*token != ')')
-			strcpy_s(errormsg, "unbalanced parentheses");
+			strcpy(errormsg, "unbalanced parentheses");
 		get_token();
 	}
 	else {
@@ -203,7 +203,7 @@ void parser::eval_expr8(long long& result) {
 		else {
 			auto itr = vars.find(token);
 			if (itr == vars.end())
-				strcpy_s(errormsg, "undefined symbol");
+				strcpy(errormsg, "undefined symbol");
 			else
 				result = itr->second;
 			get_token();
@@ -259,7 +259,7 @@ long long openVCB::evalExpr(const char* expr,
 	auto res = p.eval_expr((char*)expr);
 	if (*p.errormsg) {
 		if (err)
-			sprintf_s(err, 256, "%s at %s", p.errormsg, expr);
+			snprintf(err, 256, "%s at %s", p.errormsg, expr);
 		else fprintf(stderr, "error: \"%s\" %s\n", expr, p.errormsg);
 	}
 	return res;

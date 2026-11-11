@@ -1,8 +1,10 @@
 #pragma once
 /*
-* This is the primary header ifle for openVCB
-*/
-
+ * openVCB - Virtual Circuit Board parser and circuit data structures
+ * Adapted for vcb2verilog CLI converter.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 
 #include <glm/glm.hpp>
 #include <string>
@@ -10,16 +12,6 @@
 #include <unordered_map>
 #include <map>
 
-// Enable multithreading
-// #define OVCB_MT
-
-#ifdef OVCB_MT
-#include <atomic>
-#endif
-
-/// <summary>
-/// Primary namespace for openVCB
-/// </summary>
 namespace openVCB {
 	struct LatchInterface {
 		glm::ivec2 pos;
@@ -32,10 +24,6 @@ namespace openVCB {
 	/// <summary>
 	/// 8 bit state.
 	/// 7 bit type + 1 active bit
-	/// 
-	/// Add new logic behaivor here. 
-	/// All inks define their logic from this.
-	/// This is seperate from Ink to simplify switch logic
 	/// </summary>
 	enum class Logic {
 		NonZeroOff,
@@ -58,10 +46,6 @@ namespace openVCB {
 	/// <summary>
 	/// 8 bit state.
 	/// 7 bit type + 1 active bit
-	/// 
-	/// Add potential ink types here. 
-	/// It is VERY important to keep components in pairs for on and off to
-	/// to make sure the values are aligned correctly. 
 	/// </summary>
 	enum class Ink {
 		None = 0,
@@ -125,43 +109,35 @@ namespace openVCB {
 		return (Ink)(((int)ink & 0x7f) | (state << 7));
 	}
 
-	// Sets the ink type to be on
 	inline Ink setOn(Ink ink) {
 		return (Ink)(((int)ink & 0x7f) | 128);
 	}
 
-	// Sets the ink type to be off
 	inline Ink setOff(Ink ink) {
 		return (Ink)((int)ink & 0x7f);
 	}
 
-	// Gets the ink active state
 	inline bool getOn(Ink ink) {
 		return (int)ink >> 7;
 	}
 
-	// Sets the ink type to be on or off
 	inline Logic setOn(Logic logic, bool state) {
 		return (Logic)(((int)logic & 0x7f) | (state << 7));
 	}
 
-	// Sets the ink type to be on
 	inline Logic setOn(Logic logic) {
 		return (Logic)(((int)logic & 0x7f) | 128);
 	}
 
-	// Sets the ink type to be off
 	inline Logic setOff(Logic logic) {
 		return (Logic)((int)logic & 0x7f);
 	}
 
-	// Gets the ink active state
 	inline bool getOn(Logic logic) {
 		return (int)logic >> 7;
 	}
 
 	// Gets the logic type of said ink
-	// Define the logics of each ink here.
 	inline Logic inkLogicType(Ink ink) {
 		ink = setOff(ink);
 		switch (ink) {
@@ -189,20 +165,15 @@ namespace openVCB {
 	// Gets the string name of the ink
 	const char* getInkString(Ink ink);
 
-	struct InkState {
-#ifdef OVCB_MT
-		// Number of active inputs
-		std::atomic<int16_t> activeInputs;
+	// Base64 helper declared for blueprint and JSON VCB decoding
+	std::vector<unsigned char> b64decode(std::string data);
+	bool isBase64(std::string text);
 
-		// Flags for traversal
-		std::atomic<unsigned char> visited;
-#else
+	struct InkState {
 		// Number of active inputs
 		int16_t activeInputs;
 		// Flags for traversal
 		unsigned char visited;
-#endif
-
 		// Current logic state
 		unsigned char logic;
 	};
@@ -218,9 +189,6 @@ namespace openVCB {
 		int* rows;
 	};
 
-	// This represents a pixel with meta data as well as simulation ink type
-	// Ths is for inks that have variants which do not affect simulation
-	// i.e. Colored traces. 
 	struct InkPixel {
 		int16_t ink;
 		int16_t meta;
@@ -228,20 +196,6 @@ namespace openVCB {
 		Ink getInk() {
 			return (Ink)ink;
 		}
-	};
-
-	// This is for asyncronous exchange of data 
-	// for stuff like audio and signal scopes
-	struct InstrumentBuffer {
-		InkState* buffer;
-		int bufferSize;
-		int idx;
-	};
-
-	struct SimulationResult {
-		long long numEventsProcessed;
-		int numTicksProcessed;
-		bool breakpoint;
 	};
 
 	class Project {
@@ -255,8 +209,8 @@ namespace openVCB {
 
 		~Project();
 
-		int height;
-		int width;
+		int height = 0;
+		int width = 0;
 
 		// An image containing component indices
 		unsigned char* originalImage = nullptr;
@@ -267,14 +221,13 @@ namespace openVCB {
 			0x323841, 0xffffff, 0xff0000, 0x00ff00, 0x0000ff, 0xff0000, 0x00ff00, 0x0000ff,
 			0xff0000, 0x00ff00, 0x0000ff, 0xff0000, 0x00ff00, 0x0000ff, 0xff0000, 0x00ff00
 		};
-		int numGroups;
+		int numGroups = 0;
 
 		std::vector<int> clockGIDs;
 		unsigned long long clockCounter = 0;
 		unsigned long long clockPeriod = 2;
 
-		// Adjacentcy matrix
-		// By default, the indices from ink groups first and then component groups
+		// Adjacency matrix (CSC sparse format)
 		SparseMat writeMap = {};
 		// Stores the logic states of each group
 		InkState* states = nullptr;
@@ -284,22 +237,11 @@ namespace openVCB {
 		// Map of symbols during assembleVmem()
 		std::unordered_map<std::string, long long> assemblySymbols;
 		std::unordered_map<long long, long long> lineNumbers;
-		std::vector<InstrumentBuffer> instrumentBuffers;
-		std::map<int, Logic> breakpoints;
-		unsigned long long tickNum = 0;
 
-		// Event queue
-		int* updateQ[2]{ nullptr, nullptr };
-		int16_t* lastActiveInputs = nullptr;
-
-#ifdef OVCB_MT
-		std::atomic<int> qSize;
-#else
-		int qSize;
-#endif
-
-		// Builds a project from an image. Remember to configure VMem
-		void readFromVCB(std::string p);
+		// Builds a project from a VCB file (supports both Godot v1 and JSON v2 formats)
+		bool readFromVCB(std::string p);
+		bool readFromJsonVCB(const std::string& json);
+		bool readFromGodotVCB(const std::string& godotObj);
 
 		// Decode base64 data from clipboard, then process logic data
 		bool readFromBlueprint(std::string clipboardData);
@@ -319,43 +261,11 @@ namespace openVCB {
 		// Dump vmem contents to file
 		void dumpVMemToText(std::string p);
 
-		// Toggles the latch at position. 
-		// Does nothing if it's not a latch
+		// Toggles the latch at position / gid
 		void toggleLatch(glm::ivec2 pos);
-
-		// Toggles the latch at position. 
-		// Does nothing if it's not a latch
 		void toggleLatch(int gid);
 
-		// Preprocesses the image into the simulation format
-		// Note: Gorder is often slower. It is here as an experiment
+		// Preprocesses the image into the graph representation
 		void preprocess(bool useGorder = false);
-
-		// Methods to add and remove breakpoints
-		void addBreakpoint(int gid);
-		void removeBreakpoint(int gid);
-
-		// Advances the simulation by n ticks
-		SimulationResult tick(int numTicks = 1, long long maxEvents = 0x7fffffffffffffffll);
-
-		// Emits an event if it is not yet in the queue
-		inline bool tryEmit(int gid) {
-#ifdef OVCB_MT
-			unsigned char expect = 0;
-			// Check if this event is already in queue
-			if (states[gid].visited.compare_exchange_strong(expect, 1, std::memory_order_relaxed)) {
-				updateQ[1][qSize.fetch_add(1, std::memory_order_relaxed)] = gid;
-				return true;
-			}
-			return false;
-#else
-			// Check if this event is already in queue
-			if (states[gid].visited) return false;
-			states[gid].visited = 1;
-			updateQ[1][qSize++] = gid;
-			return true;
-#endif
-		}
 	};
-
 }

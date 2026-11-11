@@ -1,4 +1,5 @@
-// Code for mostly misc stuff.
+// openVCB - Virtual Circuit Board utility methods
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "openVCB.h"
 
@@ -15,12 +16,10 @@ namespace openVCB {
 	}
 
 	void Project::toggleLatch(int gid) {
+		if (gid < 0 || gid >= numGroups) return;
 		if (setOff(stateInks[gid]) != Ink::LatchOff)
 			return;
 		states[gid].activeInputs = 1;
-		if (states[gid].visited) return;
-		states[gid].visited = 1;
-		updateQ[0][qSize++] = gid;
 	}
 
 	Project::~Project() {
@@ -35,9 +34,6 @@ namespace openVCB {
 		if (writeMap.rows) delete[] writeMap.rows;
 		if (states) delete[] states;
 		if (stateInks) delete[] stateInks;
-		if (updateQ[0]) delete[] updateQ[0];
-		if (updateQ[1]) delete[] updateQ[1];
-		if (lastActiveInputs) delete[] lastActiveInputs;
 	}
 
 	std::pair<Ink, int> Project::sample(ivec2 pos) {

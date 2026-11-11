@@ -1,3 +1,4 @@
+#include <cstring>
 
 #include "openVCB.h"
 #include "openVCBExpr.h"
@@ -146,7 +147,7 @@ namespace openVCB {
 				sprintf(err, "line %d: %s", lineNum, errBuff);
 
 			if (loc >= vmemSize) {
-				if (err) strcpy_s(err, 256, "VMem exceeded.");
+				if (err) strncpy(err, "VMem exceeded.", 256);
 				break;
 			}
 		}
@@ -176,9 +177,9 @@ namespace openVCB {
 
 	void Project::dumpVMemToText(string p) {
 		FILE* file;
-		fopen_s(&file, p.c_str(), "w");
+		file = fopen(p.c_str(), "w");
 		for (size_t i = 0; i < vmemSize; i++)
-			fprintf(file, "a: 0x%08x = 0x%08x\n", i, vmem[i]);
+			fprintf(file, "a: 0x%08lx = 0x%08x\n", i, vmem[i]);
 		fclose(file);
 	}
 }

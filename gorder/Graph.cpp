@@ -104,7 +104,7 @@ namespace Gorder {
 
 	void Graph::readGraph(const string& fullname) {
 		FILE* fp;
-		fopen_s(&fp, fullname.c_str(), "r");
+		fp = fopen(fullname.c_str(), "r");
 		if (fp == NULL) {
 			cout << "Fail to open " << fullname << endl;
 			quit();
@@ -342,7 +342,7 @@ namespace Gorder {
 
 	void Graph::RemoveDuplicate(const string& fullname) {
 		FILE* fp;
-		fopen_s(&fp, fullname.c_str(), "r");
+		fp = fopen(fullname.c_str(), "r");
 		if (fp == NULL) {
 			cout << "Fail to open " << fullname << endl;
 			quit();
@@ -691,13 +691,13 @@ namespace Gorder {
 		for (int i = 0; i < tmporder.size() - 1; i++) {
 			if (tmporder[i] == tmporder[i + 1]) {
 				cout << "same elements: " << tmporder[i] << endl;
-				system("pause");
+				// system("pause");
 			}
 		}
 		for (int i = 0; i < tmporder.size(); i++) {
 			if (tmporder[i] != i) {
 				cout << tmporder[i] << '\t' << i << endl;
-				system("pause");
+				// system("pause");
 			}
 		}
 		tmporder = vector<int>();

@@ -420,21 +420,9 @@ namespace openVCB {
 			std::sort(&writeMap.rows[start], &writeMap.rows[end]);
 		}
 
-		updateQ[0] = new int[writeMap.n];
-		updateQ[1] = new int[writeMap.n];
-		lastActiveInputs = new int16_t[writeMap.n];
-		qSize = 0;
-
-		// Insert starting events into the queue
+		// Record clocks and latch initial states
 		for (size_t i = 0; i < writeMap.n; i++) {
 			Ink ink = stateInks[i];
-			if (ink == Ink::NotOff ||
-				ink == Ink::NorOff ||
-				ink == Ink::NandOff ||
-				ink == Ink::XnorOff ||
-				ink == Ink::Latch)
-				updateQ[0][qSize++] = i;
-
 			if (ink == Ink::ClockOff)
 				clockGIDs.push_back(i);
 

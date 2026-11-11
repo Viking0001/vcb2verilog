@@ -23,7 +23,7 @@ string extractFilename(const char* filename){
 }
 
 void quit(){
-	system("pause");
+	// system("pause");
 	exit(0);
 }
 

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "openVCB.h"
 
 namespace openVCB {
@@ -17,18 +18,18 @@ namespace openVCB {
         std::vector<unsigned char> result(size / 4 * 3 + pad);
 
         for (size_t i = 0, j = 0; i < size; i += 4) {
-            int n = B64index[data[i]] << 18 | B64index[data[i + 1]] << 12 | B64index[data[i + 2]] << 6 | B64index[data[i + 3]];
+            int n = B64index[(unsigned char)data[i]] << 18 | B64index[(unsigned char)data[i + 1]] << 12 | B64index[(unsigned char)data[i + 2]] << 6 | B64index[(unsigned char)data[i + 3]];
             result[j++] = n >> 16;
             result[j++] = n >> 8 & 0xFF;
             result[j++] = n & 0xFF;
         }
 
         if (pad) {
-            int n = B64index[data[size]] << 18 | B64index[data[size + 1]] << 12;
+            int n = B64index[(unsigned char)data[size]] << 18 | B64index[(unsigned char)data[size + 1]] << 12;
             result[result.size() - 1] = n >> 16;
 
             if (len > size + 2 && data[size + 2] != '=') {
-                n |= B64index[data[size + 2]] << 6;
+                n |= B64index[(unsigned char)data[size + 2]] << 6;
                 result.push_back(n >> 8 & 0xFF);
             }
         }
@@ -55,7 +56,7 @@ namespace openVCB {
     }
 
     std::string removeWhitespace(std::string str) {
-        str.erase(remove_if(str.begin(), str.end(), std::isspace), str.end());
+        str.erase(remove_if(str.begin(), str.end(), [](unsigned char c){ return std::isspace(c); }), str.end());
         return str;
     }
 
