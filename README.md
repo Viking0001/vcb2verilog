@@ -5,24 +5,24 @@
 ---
 
 > [!WARNING]
-> ### 🤖 AI Development Disclaimer
+> ### AI Development Disclaimer
 > This project was developed and refactored with the assistance of artificial intelligence (LLM coding agents). While the generated code has been compiled, analyzed, and verified with test projects, **AI can make mistakes**. Circuit designs intended for safety-critical systems or production hardware should always be independently reviewed, simulated (e.g., via Icarus Verilog or Verilator), and validated before deployment on physical silicon.
 
 ---
 
-## 🚀 Key Features
+## Key Features
 
 - **Direct VCB to Verilog Transpilation**: Converts `.vcb` files (both VCB v1 Godot format and VCB v2 JSON base64 format) into standard, synthesizable Verilog HDL.
 - **Continuous Combinational Logic**: Translates logic gates (`AND`, `OR`, `NOT`, `NAND`, `NOR`, `XOR`, `XNOR`, `TRACE`, `BUNDLE`) into asynchronous continuous assignments (`assign`), propagating signals in nanoseconds on FPGA LUTs without waiting for software game ticks.
-- **Hardware-Accurate Latches (T-Flip-Flop)**: Maps VCB Latch memory elements into clocked T-Flip-Flops with rising-edge detection (`always @(posedge clk)`). Latches without internal driving inputs are automatically exposed as external pushbutton (`btn_N`) inputs.
+- **Hardware-Accurate Latches (T-Flip-Flop)**: Maps VCB Latch memory elements into clocked T-Flip-Flops with rising-edge detection (`always @(posedge clk)`). Latches without internal driving inputs are automatically exposed as external pushbutton (`btn_X_Y`) inputs, named after their grid coordinates.
 - **Pipeline Delay Buffers (D-Flip-Flop)**: Translates 1-tick delay VCB Buffers into synchronous D-type flip-flop registers.
-- **Top-Level Ports & LEDs**: Automatically maps boundary READ/WRITE pins and game LEDs to top-level module ports (`input wire in_N`, `output wire led_N`).
+- **Top-Level Ports & LEDs**: Automatically maps boundary READ/WRITE pins and game LEDs to top-level module ports. Port names now carry the element's real grid coordinates (e.g. `input wire input_X_Y`, `output wire output_X_Y`, `output wire led_X_Y`, `input wire btn_X_Y`), which makes FPGA pin mapping much easier.
 - **Open-Source EDA Toolchain Integration**: Designed for seamless synthesis with **Yosys**, place-and-route with **nextpnr**, and simulation with **Icarus Verilog** (`iverilog`).
 - **Blazing Fast**: Parses, processes 2D grid connectivity, and emits Verilog for 130,000+ gate microarchitectures in under **200 milliseconds**.
 
 ---
 
-## 📦 Requirements & Dependencies
+## Requirements & Dependencies
 
 - **C++17** compatible compiler (GCC 9+, Clang 10+, or MSVC 2019+)
 - **CMake** 3.14 or newer
@@ -50,7 +50,7 @@ sudo pacman -S base-devel cmake zstd glm openmp
 
 ---
 
-## 🛠️ Build & Installation
+## Build & Installation
 
 ### Build with CMake
 
@@ -84,7 +84,7 @@ g++ -std=c++17 -O3 -Wall -Wno-switch -Wno-unused-parameter \
 
 ---
 
-## 💡 Quick Start & CLI Usage
+## Quick Start & CLI Usage
 
 ```
 vcb2verilog [OPTIONS] <input.vcb> [-o <output.v>]
@@ -116,30 +116,30 @@ Output:
 ```
 =====================================================
  vcb2verilog v1.0.0 - Virtual Circuit Board to Verilog
- Cílová platforma: Syntetizovatelný Verilog pro FPGA
+ Target: Synthesizable Verilog HDL for FPGA
 =====================================================
-Vstupní soubor : examples/counter_2bit.vcb
-Výstupní soubor: counter_2bit.v
-Název modulu   : counter_2bit
-Perioda hodin  : 2 cyklů
+Input file   : examples/counter_2bit.vcb
+Output file  : counter_2bit.v
+Module name  : counter_2bit
+Clock period : 2 cycles
 -----------------------------------------------------
-Překlad úspěšně dokončen za 34.7 ms!
-  Počet skupin/hradel: 7
-  Počet spojů        : 6
-  Vstupní porty      : 2
-  Výstupní porty     : 1
-  LED výstupy        : 1
-  Kombinační hradla  : 4
-  Registry (D-FF)    : 0
-  Paměti (Latch/T-FF): 2
-  Děličky hodin      : 0
-Výsledný soubor: counter_2bit.v
+Translation completed successfully in 35.9 ms!
+  Total groups/gates : 7
+  Wire connections   : 6
+  Input ports        : 2
+  Output ports       : 1
+  LED outputs        : 1
+  Combinational gates: 4
+  Registers (D-FF)   : 0
+  Latches (T-FF)     : 2
+  Clock dividers     : 0
+Generated file: counter_2bit.v
 =====================================================
 ```
 
 ---
 
-## 🔬 Hardware Synthesis & Simulation Verification
+## Hardware Synthesis & Simulation Verification
 
 ### 1. Verification with Icarus Verilog Simulation
 
@@ -174,13 +174,13 @@ iceprog counter_2bit.bin
 
 ---
 
-## 🗺️ VCB Element Mapping Reference
+## VCB Element Mapping Reference
 
 | VCB Ink Element | Internal Logic | Verilog Representation | Hardware Implementation |
 |---|---|---|---|
-| **READ** | Abstract Input Port | `input wire in_GID` | External FPGA pin / button |
-| **WRITE** | Abstract Output Port | `output wire out_GID` | External FPGA pin / pad |
-| **LED** | Visual Indicator | `output wire led_GID` | On-board FPGA LED |
+| **READ** | Abstract Input Port | `input wire input_X_Y` | External FPGA pin / button (X, Y = grid coordinates) |
+| **WRITE** | Abstract Output Port | `output wire output_X_Y` | External FPGA pin / pad (X, Y = grid coordinates) |
+| **LED** | Visual Indicator | `output wire led_X_Y` | On-board FPGA LED (X, Y = grid coordinates) |
 | **TRACE / BUNDLE** | Wire / 16-color Bus | `assign g_N = in1 \| in2;` | Combinational routing network |
 | **CROSS** | Isolated Wire Crossing | Independent Net Labels | Physical 3D routing on FPGA metal layers |
 | **BUFFER** | 1-tick Game Delay | `always @(posedge clk) g_N <= in;` | 1-cycle D Flip-Flop register |
@@ -193,7 +193,7 @@ iceprog counter_2bit.bin
 
 ---
 
-## 📜 License & Credits
+## License & Credits
 
 - Licensed under the **GNU General Public License v3.0 (GPL-3.0-or-later)**. See [LICENSE.md](LICENSE.md).
 - Based on the original open-source [openVCB](https://github.com/kittybupu/openVCB) parser by Jerry.

@@ -105,6 +105,20 @@ void VerilogEmitter::buildGraphInfo() {
             reverseAdj[dst].push_back(src);
         }
     }
+
+    // Representative coordinate (first pixel in row-major order) for each group
+    groupCoords.assign(proj.numGroups, std::make_pair(-1, -1));
+    if (proj.indexImage != nullptr && proj.width > 0 && proj.height > 0) {
+        for (int y = 0; y < proj.height; y++) {
+            for (int x = 0; x < proj.width; x++) {
+                int gid = proj.indexImage[x + y * proj.width];
+                if (gid >= 0 && gid < proj.numGroups &&
+                    groupCoords[gid].first < 0) {
+                    groupCoords[gid] = std::make_pair(x, y);
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -179,10 +193,21 @@ void VerilogEmitter::analyzeGroups() {
 // Signal naming
 // ---------------------------------------------------------------------------
 
+std::pair<int,int> VerilogEmitter::groupCoord(int gid) const {
+    if (gid >= 0 && gid < (int)groupCoords.size()) {
+        auto c = groupCoords[gid];
+        if (c.first >= 0) return c;
+    }
+    return std::make_pair(gid, 0);
+}
+
 std::string VerilogEmitter::sigName(int gid) const {
-    if (inputGroups.count(gid))  return "in_"  + std::to_string(gid);
-    if (outputGroups.count(gid)) return "out_" + std::to_string(gid);
-    if (ledGroups.count(gid))    return "led_" + std::to_string(gid);
+    auto c = groupCoord(gid);
+    int x = c.first;
+    int y = c.second;
+    if (inputGroups.count(gid))  return "input_" + std::to_string(x) + "_" + std::to_string(y);
+    if (outputGroups.count(gid)) return "output_" + std::to_string(x) + "_" + std::to_string(y);
+    if (ledGroups.count(gid))    return "led_" + std::to_string(x) + "_" + std::to_string(y);
     return "g_" + std::to_string(gid);
 }
 
@@ -271,8 +296,10 @@ void VerilogEmitter::emitPorts(std::ostream& f, const std::string& moduleName) {
     for (int gid : inputGroups)
         ports.push_back("    input  wire " + sigName(gid));
 
-    for (int gid : latchBtnInputs)
-        ports.push_back("    input  wire btn_" + std::to_string(gid));
+    for (int gid : latchBtnInputs) {
+        auto c = groupCoord(gid);
+        ports.push_back("    input  wire btn_" + std::to_string(c.first) + "_" + std::to_string(c.second));
+    }
 
     for (int gid : outputGroups)
         ports.push_back("    output wire " + sigName(gid));
@@ -346,7 +373,8 @@ void VerilogEmitter::emitComb(std::ostream& f) {
     for (int gid : latchGroups) {
         std::string expr;
         if (latchBtnInputs.count(gid)) {
-            expr = "btn_" + std::to_string(gid);
+            auto c = groupCoord(gid);
+            expr = "btn_" + std::to_string(c.first) + "_" + std::to_string(c.second);
         } else {
             expr = combExpr(gid, "^", "1'b0");
         }

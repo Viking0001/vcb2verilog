@@ -10,6 +10,7 @@
 #include <fstream>
 #include <vector>
 #include <set>
+#include <utility>
 
 class VerilogEmitter {
 public:
@@ -38,6 +39,9 @@ public:
 
 private:
     openVCB::Project& proj;
+
+    // Representative grid coordinate (first pixel) of each group
+    std::vector<std::pair<int,int>> groupCoords;
 
     // ---------- analysis results ----------
     std::set<int> inputGroups;     // READ / external traces → top-level input ports
@@ -71,6 +75,7 @@ private:
 
     // ---------- helpers ----------
     std::string sigName(int gid) const;
+    std::pair<int,int> groupCoord(int gid) const;
     static const char* inkTag(openVCB::Ink ink);
     std::string combExpr(int gid, const char* op, const char* defaultVal) const;
 };
