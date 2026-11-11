@@ -194,7 +194,7 @@ namespace openVCB {
 		int end = data.find(t, start + 1);
 
 		if (end < 0) {
-			throw std::runtime_error(std::string("V souboru .vcb chybí očekávaný token: [") + t + "]");
+			throw std::runtime_error(std::string("Missing expected token in .vcb file: [") + t + "]");
 		}
 
 		start = end + tlen;
@@ -209,7 +209,7 @@ namespace openVCB {
 		height = header[1];
 
 		if (imgDSize != width * height * 4) {
-			printf("error: header width x height does not match header length");
+			fprintf(stderr, "Error: Header width x height does not match header length\n");
 			return 0;
 		}
 
@@ -219,15 +219,15 @@ namespace openVCB {
 		imSize = ZSTD_getFrameContentSize(cc, ccSize);
 
 		if (imSize == ZSTD_CONTENTSIZE_ERROR) {
-			printf("error: not compressed by zstd!");
+			fprintf(stderr, "Error: Data not compressed by zstd!\n");
 			return 0;
 		}
 		else if (imSize == ZSTD_CONTENTSIZE_UNKNOWN) {
-			printf("error: original size unknown!");
+			fprintf(stderr, "Error: Original size unknown!\n");
 			return 0;
 		}
 		else if (imSize != imgDSize) {
-			printf("error: decompressed image data size does not match header");
+			fprintf(stderr, "Error: Decompressed image data size does not match header\n");
 			return 0;
 		}
 		else {
@@ -265,7 +265,7 @@ namespace openVCB {
 	bool Project::readFromVCB(std::string filePath) {
 		std::ifstream stream(filePath, std::ios::binary);
 		if (!stream.is_open()) {
-			fprintf(stderr, "Chyba: Nelze otevřít soubor pro čtení: \"%s\"\n", filePath.c_str());
+			fprintf(stderr, "Error: Cannot open file for reading: \"%s\"\n", filePath.c_str());
 			return false;
 		}
 
@@ -275,7 +275,7 @@ namespace openVCB {
 		stream.close();
 
 		if (content.empty()) {
-			fprintf(stderr, "Chyba: Soubor \"%s\" je prázdný\n", filePath.c_str());
+			fprintf(stderr, "Error: File \"%s\" is empty\n", filePath.c_str());
 			return false;
 		}
 
@@ -289,7 +289,7 @@ namespace openVCB {
 				return readFromJsonVCB(content);
 			}
 		} catch (const std::exception& e) {
-			fprintf(stderr, "Chyba při čtení VCB \"%s\": %s\n", filePath.c_str(), e.what());
+			fprintf(stderr, "Error parsing VCB file \"%s\": %s\n", filePath.c_str(), e.what());
 			return false;
 		}
 	}
@@ -318,7 +318,7 @@ namespace openVCB {
 		// 3. layers (base64 zstd streams)
 		pos = json.find("\"layers\":");
 		if (pos == std::string::npos) {
-			throw std::runtime_error("v JSON .vcb chybí klíč \"layers\"");
+			throw std::runtime_error("Missing \"layers\" key in JSON .vcb file");
 		}
 		pos = json.find("[", pos);
 		std::vector<std::string> b64Layers;
@@ -334,7 +334,7 @@ namespace openVCB {
 		}
 
 		if (b64Layers.empty()) {
-			throw std::runtime_error("v JSON .vcb nebyly nalezeny žádné vrstvy (layers)");
+			throw std::runtime_error("No layers found in JSON .vcb file");
 		}
 
 		// Layer 0 is logic data
