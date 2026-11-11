@@ -193,6 +193,9 @@ iceprog counter_2bit.bin
 
 ---
 
+## Acknowledgements
+This project is inspired by and builds upon the file format concepts of [openVCB](https://github.com/kittybupu/openVCB).
+
 ## License & Credits
 
 - Licensed under the **GNU General Public License v3.0 (GPL-3.0-or-later)**. See [LICENSE.md](LICENSE.md).
