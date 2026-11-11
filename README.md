@@ -55,7 +55,7 @@ sudo pacman -S base-devel cmake zstd glm openmp
 ### Build with CMake
 
 ```bash
-git clone https://github.com/Viking0001/openVCB.git vcb2verilog
+git clone https://github.com/Viking0001/vcb2verilog.git vcb2verilog
 cd vcb2verilog
 mkdir build && cd build
 cmake ..
