@@ -479,6 +479,7 @@ void VerilogEmitter::emitComb(std::ostream& f) {
 
     // Output ports (WRITE)
     for (int gid : outputGroups) {
+        if (latchBtnInputs.count(gid)) continue;
         std::string expr = combExpr(gid, "|", "1'b0");
         f << "    assign " << sigName(gid) << " = " << expr
           << ";  // WRITE [" << gid << "]\n";
@@ -486,6 +487,7 @@ void VerilogEmitter::emitComb(std::ostream& f) {
 
     // LED ports
     for (int gid : ledGroups) {
+        if (latchBtnInputs.count(gid)) continue;
         std::string expr = combExpr(gid, "|", "1'b0");
         f << "    assign " << sigName(gid) << " = " << expr
           << ";  // LED [" << gid << "]\n";
@@ -651,7 +653,6 @@ void VerilogEmitter::emitSeq(std::ostream& f) {
     // Latches: Toggle on rising edge of input (T flip-flop)
     for (int gid : latchGroups) {
         if (selfLoopLatches.count(gid)) continue;
-        if (latchBtnInputs.count(gid)) continue;
         if (latchBtnInputs.count(gid)) continue;
         std::string inSig = sigName(gid) + "_in";
         std::string prevSig = sigName(gid) + "_prev";
