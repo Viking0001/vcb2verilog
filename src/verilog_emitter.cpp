@@ -354,19 +354,19 @@ void VerilogEmitter::emitWires(std::ostream& f) {
 
     // Buffer registers (D flip-flops)
     for (int gid : bufferGroups) {
-        f << "    reg  " << sigName(gid) << ";  // BUFFER (D-FF) [" << gid << "]\n";
+        f << "    reg  " << sigName(gid) << " = 1'b0;  // BUFFER (D-FF) [" << gid << "]\n";
     }
 
     // Latch registers + edge-detect helpers (T flip-flops)
     for (int gid : latchGroups) {
-        f << "    reg  " << sigName(gid) << ";  // LATCH (T-FF) [" << gid << "]\n";
-        f << "    reg  " << sigName(gid) << "_prev;\n";
+        f << "    reg  " << sigName(gid) << " = 1'b0;  // LATCH (T-FF) [" << gid << "]\n";
+        f << "    reg  " << sigName(gid) << "_prev = 1'b0;\n";
         f << "    wire " << sigName(gid) << "_in;\n";
     }
 
     // Clock registers & divider counters
     for (int gid : clockGroups) {
-        f << "    reg  " << sigName(gid) << ";  // CLOCK [" << gid << "]\n";
+        f << "    reg  " << sigName(gid) << " = 1'b0;  // CLOCK [" << gid << "]\n";
         f << "    reg  [31:0] " << sigName(gid) << "_cnt;\n";
     }
 
@@ -551,11 +551,21 @@ void VerilogEmitter::emitSeq(std::ostream& f) {
         f << "    // Virtual Memory (BRAM) at (" << x << ", " << y << ")\n";
         f << "    reg [" << (dataW > 0 ? dataW-1 : 0) << ":0] " << memName
           << " [0:" << (depth-1) << "];\n";
-        f << "    initial $readmemh(\"" << vmemMemFile << "\", " << memName << ");\n";
+        f << "    integer mem_i_" << x << "_" << y << ";\n";
+        f << "    initial begin\n";
+        f << "        for (mem_i_" << x << "_" << y << " = 0; mem_i_" << x << "_" << y
+          << " < " << depth << "; mem_i_" << x << "_" << y << " = mem_i_" << x << "_" << y
+          << " + 1)\n";
+        f << "            " << memName << "[mem_i_" << x << "_" << y << "] = "
+          << (dataW > 0 ? std::to_string(dataW) + "'h00" : "1'b0") << ";\n";
+        if (!vmemMemFile.empty()) {
+            f << "        $readmemh(\"" << vmemMemFile << "\", " << memName << ");\n";
+        }
+        f << "    end\n";
         f << "    reg  [" << (dataW > 0 ? dataW-1 : 0) << ":0] mem_rdata_"
-          << x << "_" << y << ";\n";
+          << x << "_" << y << " = " << (dataW > 0 ? std::to_string(dataW) + "'h00" : "1'b0") << ";\n";
         f << "    reg  [" << (dataW > 0 ? dataW-1 : 0) << ":0] mem_toggle_prev_"
-          << x << "_" << y << ";\n";
+          << x << "_" << y << " = " << (dataW > 0 ? std::to_string(dataW) + "'h00" : "1'b0") << ";\n";
         f << "    wire [" << (addrW > 0 ? addrW-1 : 0) << ":0] mem_addr_"
           << x << "_" << y << " = " << addrExpr.str() << ";\n";
 
