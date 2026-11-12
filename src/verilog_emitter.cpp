@@ -367,7 +367,7 @@ void VerilogEmitter::emitWires(std::ostream& f) {
     // Clock registers & divider counters
     for (int gid : clockGroups) {
         f << "    reg  " << sigName(gid) << " = 1'b0;  // CLOCK [" << gid << "]\n";
-        f << "    reg  [31:0] " << sigName(gid) << "_cnt;\n";
+        f << "    reg  [31:0] " << sigName(gid) << "_cnt = 32'd0;\n";
     }
 
     f << "\n";
@@ -554,13 +554,9 @@ void VerilogEmitter::emitSeq(std::ostream& f) {
         f << "    integer mem_i_" << x << "_" << y << ";\n";
         f << "    initial begin\n";
         f << "        for (mem_i_" << x << "_" << y << " = 0; mem_i_" << x << "_" << y
-          << " < " << depth << "; mem_i_" << x << "_" << y << " = mem_i_" << x << "_" << y
-          << " + 1)\n";
-        f << "            " << memName << "[mem_i_" << x << "_" << y << "] = "
-          << (dataW > 0 ? std::to_string(dataW) + "'h00" : "1'b0") << ";\n";
-        if (!vmemMemFile.empty()) {
-            f << "        $readmemh(\"" << vmemMemFile << "\", " << memName << ");\n";
-        }
+          << " < " << depth << "; mem_i_" << x << "_" << y << " = mem_i_" << x << "_" << y << " + 1)\n";
+        f << "            " << memName << "[mem_i_" << x << "_" << y << "] = " << (dataW > 0 ? std::to_string(dataW) + "'h00" : "1'b0") << ";\n";
+        f << "        $readmemh(\"" << vmemMemFile << "\", " << memName << ");\n";
         f << "    end\n";
         f << "    reg  [" << (dataW > 0 ? dataW-1 : 0) << ":0] mem_rdata_"
           << x << "_" << y << " = " << (dataW > 0 ? std::to_string(dataW) + "'h00" : "1'b0") << ";\n";
