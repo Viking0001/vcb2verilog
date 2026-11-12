@@ -497,12 +497,8 @@ void VerilogEmitter::emitComb(std::ostream& f) {
     for (int gid : latchGroups) {
         if (selfLoopLatches.count(gid)) continue;
         if (latchBtnInputs.count(gid)) continue;
-        if (latchBtnInputs.count(gid)) continue;
         std::string expr;
-        if (latchBtnInputs.count(gid)) {
-            auto c = groupCoord(gid);
-            expr = "btn_" + std::to_string(c.first) + "_" + std::to_string(c.second);
-        } else if (hasVmem) {
+        if (hasVmem) {
             // Virtual memory data latches are fed by BRAM read data
             int bitIndex = -1;
             for (size_t i = 0; i < vmemDataGids.size(); i++) {
