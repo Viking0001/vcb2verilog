@@ -43,6 +43,7 @@ void printHelp(const char* progName) {
               << "  -v, --verbose              Display detailed translation stages & circuit statistics\n"
               << "      --no-opt               Disable automatic Yosys optimization of the output Verilog\n"
               << "  -O, --opt-level <level>    Optimization level: 'opt' (default) or 'full'\n"
+              << "      --mem <file>           Override virtual memory contents with a .vcbmem file\n"
               << "  -h, --help                 Show this help message and exit\n"
               << "      --version              Show version information and exit\n\n"
               << "Note: By default the generated Verilog is optimized with Yosys (optional dependency).\n"
@@ -62,6 +63,7 @@ int main(int argc, char** argv) {
     bool verbose = false;
     bool optimize = true;
     std::string optLevel = "opt";
+    std::string memFile;
 
     // 1. Parse command line arguments
     for (int i = 1; i < argc; i++) {
@@ -86,6 +88,12 @@ int main(int argc, char** argv) {
                 std::cerr << "Error: Unknown optimization level: \"" << optLevel << "\". Use 'opt' or 'full'.\n";
                 return 1;
             }
+        } else if (arg == "--mem" || arg == "-M") {
+            if (++i >= argc) {
+                std::cerr << "Error: Option " << arg << " requires a .vcbmem file path.\n";
+                return 1;
+            }
+            memFile = argv[i];
         } else if (arg == "-v" || arg == "--verbose") {
             verbose = true;
         } else if (arg == "-e" || arg == "--expose-inputs") {
@@ -228,12 +236,80 @@ int main(int argc, char** argv) {
                   << proj.writeMap.nnz << " wire connections.\n";
     }
 
+    // Assemble virtual memory (if present)
+    proj.assembleVmem();
+
+    // Override virtual memory contents from external .vcbmem file if requested
+    if (!memFile.empty()) {
+        if (!fs::exists(memFile)) {
+            std::cerr << "Error: Memory file does not exist: \"" << memFile << "\"\n";
+            return 1;
+        }
+        if (!proj.vmem || proj.vmemSize == 0) {
+            std::cerr << "Error: Project does not contain virtual memory, cannot apply --mem.\n";
+            return 1;
+        }
+        std::ifstream mf(memFile, std::ios::binary);
+        if (!mf.is_open()) {
+            std::cerr << "Error: Cannot open memory file: \"" << memFile << "\"\n";
+            return 1;
+        }
+        mf.seekg(0, std::ios::end);
+        size_t fsize = (size_t)mf.tellg();
+        mf.seekg(0, std::ios::beg);
+        std::vector<unsigned char> buf(fsize);
+        mf.read((char*)buf.data(), fsize);
+        if ((size_t)mf.gcount() != fsize) {
+            std::cerr << "Error: Failed to read memory file: \"" << memFile << "\"\n";
+            return 1;
+        }
+        size_t expected = (size_t)proj.vmemSize * 4;
+        if (fsize != expected) {
+            std::cerr << "Warning: Memory file size (" << fsize << " bytes) differs from expected ("
+                      << expected << " bytes).\n";
+        }
+        for (size_t i = 0; i < proj.vmemSize; i++) {
+            unsigned int val = 0;
+            for (int b = 0; b < 4; b++) {
+                size_t idx = i*4 + b;
+                if (idx < buf.size()) val |= ((unsigned int)buf[idx]) << (8*b);
+            }
+            proj.vmem[i] = (int)val;
+        }
+        std::cout << "Loaded virtual memory contents from: " << memFile << "\n";
+    }
+
+    // Export initial memory contents to .mem file (hex) if virtual memory present
+    std::string memFilePath;
+    if (proj.vmem && proj.vmemSize > 0) {
+        std::string outDir = ".";
+        if (outputFile != "-") {
+            fs::path op(outputFile);
+            if (op.has_parent_path()) outDir = op.parent_path().string();
+        }
+        std::string memName = VerilogEmitter::sanitizeIdentifier(moduleName) + "_mem_" +
+                              std::to_string(proj.vmAddr.pos.x) + "_" +
+                              std::to_string(proj.vmAddr.pos.y) + ".mem";
+        memFilePath = outDir + "/" + memName;
+        std::ofstream memOut(memFilePath);
+        if (memOut.is_open()) {
+            for (size_t i = 0; i < proj.vmemSize; i++) {
+                memOut << std::hex << proj.vmem[i] << "\n";
+            }
+            memOut.close();
+            std::cout << "Exported virtual memory init file: " << memFilePath << "\n";
+        } else {
+            std::cerr << "Warning: Could not write memory init file: " << memFilePath << "\n";
+        }
+    }
+
     // 6. Emit synthesizable Verilog HDL
     if (verbose) std::cout << "[3/3] Emitting synthesizable Verilog...\n";
 
     VerilogEmitter emitter(proj);
     emitter.exposeZeroInDegreeTraces = exposeInputs;
     emitter.clockPeriod = clockPeriod;
+    emitter.vmemMemFile = memFilePath.empty() ? std::string() : memFilePath;
 
     if (!emitter.emit(outputFile, moduleName)) {
         std::cerr << "Error: Failed to write Verilog output to: \"" << outputFile << "\"\n";

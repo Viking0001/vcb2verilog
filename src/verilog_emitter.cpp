@@ -106,6 +106,13 @@ void VerilogEmitter::buildGraphInfo() {
         }
     }
 
+    // Virtual memory support
+    hasVmem = (proj.vmem != nullptr && proj.vmemSize > 0);
+    if (hasVmem) {
+        for (int i = 0; i < proj.vmAddr.numBits; i++) vmemAddrGids.push_back(proj.vmAddr.gids[i]);
+        for (int i = 0; i < proj.vmData.numBits; i++) vmemDataGids.push_back(proj.vmData.gids[i]);
+    }
+
     // Representative coordinate (first pixel in row-major order) for each group
     groupCoords.assign(proj.numGroups, std::make_pair(-1, -1));
     if (proj.indexImage != nullptr && proj.width > 0 && proj.height > 0) {
@@ -375,6 +382,17 @@ void VerilogEmitter::emitComb(std::ostream& f) {
         if (latchBtnInputs.count(gid)) {
             auto c = groupCoord(gid);
             expr = "btn_" + std::to_string(c.first) + "_" + std::to_string(c.second);
+        } else if (hasVmem) {
+            // Virtual memory data latches are fed by BRAM read data
+            int bitIndex = -1;
+            for (size_t i = 0; i < vmemDataGids.size(); i++) {
+                if (vmemDataGids[i] == gid) { bitIndex = (int)i; break; }
+            }
+            if (bitIndex >= 0) {
+                expr = "mem_rdata_" + std::to_string(proj.vmAddr.pos.x) + "_" + std::to_string(proj.vmAddr.pos.y) + "[" + std::to_string(bitIndex) + "]";
+            } else {
+                expr = combExpr(gid, "^", "1'b0");
+            }
         } else {
             expr = combExpr(gid, "^", "1'b0");
         }
@@ -495,6 +513,40 @@ void VerilogEmitter::emitSeq(std::ostream& f) {
 
     f << "        end\n";
     f << "    end\n\n";
+
+    // Virtual memory (BRAM) template
+    if (hasVmem) {
+        int x = proj.vmAddr.pos.x;
+        int y = proj.vmAddr.pos.y;
+        int addrW = proj.vmAddr.numBits;
+        int dataW = proj.vmData.numBits;
+        unsigned long long depth = (addrW > 0) ? (1ULL << addrW) : 1ULL;
+        std::string memName = "mem_" + std::to_string(x) + "_" + std::to_string(y);
+        // address concatenation
+        std::ostringstream addrExpr;
+        addrExpr << "{";
+        for (size_t i = 0; i < vmemAddrGids.size(); i++) {
+            if (i) addrExpr << ", ";
+            addrExpr << sigName(vmemAddrGids[i]);
+        }
+        addrExpr << "}";
+        f << "    // Virtual Memory (BRAM) at (" << x << ", " << y << ")\n";
+        f << "    reg [" << (dataW > 0 ? dataW-1 : 0) << ":0] " << memName
+          << " [0:" << (depth-1) << "];\n";
+        f << "    initial $readmemh(\"" << vmemMemFile << "\", " << memName << ");\n";
+        f << "    reg [" << (dataW > 0 ? dataW-1 : 0) << ":0] mem_rdata_"
+          << x << "_" << y << ";\n";
+        f << "    wire [" << (addrW > 0 ? addrW-1 : 0) << ":0] mem_addr_"
+          << x << "_" << y << " = " << addrExpr.str() << ";\n";
+        f << "    always @(posedge clk) begin\n";
+        f << "        if (rst) begin\n";
+        f << "            mem_rdata_" << x << "_" << y << " <= " << dataW << "'d0;\n";
+        f << "        end else begin\n";
+        f << "            mem_rdata_" << x << "_" << y << " <= " << memName
+          << "[mem_addr_" << x << "_" << y << "];\n";
+        f << "        end\n";
+        f << "    end\n\n";
+    }
 }
 
 void VerilogEmitter::emitFooter(std::ostream& f) {

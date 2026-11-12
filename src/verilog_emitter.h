@@ -21,6 +21,9 @@ public:
     /// Custom clock period (number of ticks per pulse)
     unsigned long long clockPeriod = 2;
 
+    // Path to virtual memory init file (.mem) for $readmemh
+    std::string vmemMemFile;
+
     /// Emit Verilog to the given file (or stdout if outputPath is empty or "-").
     /// Returns true on success.
     bool emit(const std::string& outputPath, const std::string& moduleName);
@@ -42,6 +45,11 @@ private:
 
     // Representative grid coordinate (first pixel) of each group
     std::vector<std::pair<int,int>> groupCoords;
+
+    // Virtual memory (BRAM) support
+    bool hasVmem = false;
+    std::vector<int> vmemAddrGids;
+    std::vector<int> vmemDataGids;
 
     // ---------- analysis results ----------
     std::set<int> inputGroups;     // READ / external traces → top-level input ports
