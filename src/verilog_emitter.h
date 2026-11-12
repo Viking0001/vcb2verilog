@@ -10,6 +10,7 @@
 #include <fstream>
 #include <vector>
 #include <set>
+#include <map>
 #include <utility>
 
 class VerilogEmitter {
@@ -45,6 +46,7 @@ private:
 
     // Representative grid coordinate (first pixel) of each group
     std::vector<std::pair<int,int>> groupCoords;
+    std::map<int,std::vector<int>> selfLoopExtInputs;
 
     // Virtual memory (BRAM) support
     bool hasVmem = false;
@@ -63,6 +65,7 @@ private:
     std::set<int> combGroups;      // everything else that is combinational
     std::set<int> ignoredGroups;   // Filler, Annotation, Cross, None
     std::set<int> latchBtnInputs;  // Latches with no internal inputs -> external btn_GID
+    std::set<int> selfLoopLatches;  // Latches with self-feedback -> 1-tick pulse
 
     bool needsClk = false;   // any sequential element present?
     bool needsRst = false;

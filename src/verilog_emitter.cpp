@@ -168,15 +168,35 @@ void VerilogEmitter::analyzeGroups() {
             bufferGroups.insert(gid);
             break;
 
-        case Ink::LatchOff:
-            if (!(hasVmem && std::find(vmemDataGids.begin(), vmemDataGids.end(), gid) != vmemDataGids.end())) {
+        case Ink::LatchOff: {
+            bool isSelfLoop = false;
+            std::vector<int> extInputs;
+            for (int src : reverseAdj[gid]) {
+                if (src == gid) {
+                    isSelfLoop = true;
+                } else {
+                    bool srcSelf = false;
+                    for (int s2 : reverseAdj[src]) {
+                        if (s2 == gid) { srcSelf = true; break; }
+                    }
+                    if (srcSelf) isSelfLoop = true;
+                    else extInputs.push_back(src);
+                }
+            }
+            if (hasVmem && std::find(vmemDataGids.begin(), vmemDataGids.end(), gid) != vmemDataGids.end()) {
+                // virtual memory data latch: handled by BRAM
+            } else if (isSelfLoop) {
+                selfLoopLatches.insert(gid);
+                selfLoopExtInputs[gid] = extInputs;
+            } else {
                 latchGroups.insert(gid);
             }
-            if (reverseAdj[gid].empty()) {
+            if (reverseAdj[gid].empty() && !(hasVmem && std::find(vmemDataGids.begin(), vmemDataGids.end(), gid) != vmemDataGids.end())) {
                 // Latch has no internal driving inputs -> manual user button/switch
                 latchBtnInputs.insert(gid);
             }
             break;
+        }
 
         case Ink::ClockOff:
             clockGroups.insert(gid);
@@ -321,6 +341,14 @@ void VerilogEmitter::emitPorts(std::ostream& f, const std::string& moduleName) {
     for (int gid : inputGroups)
         ports.push_back("    input  wire " + sigName(gid));
 
+    // Self-loop (clickable) latches get a top-level trigger input
+    for (int gid : selfLoopLatches) {
+        if (selfLoopExtInputs[gid].empty()) {
+            auto c = groupCoord(gid);
+            ports.push_back("    input  wire latch_" + std::to_string(c.first) + "_" + std::to_string(c.second));
+        }
+    }
+
     for (int gid : latchBtnInputs) {
         auto c = groupCoord(gid);
         ports.push_back("    input  wire btn_" + std::to_string(c.first) + "_" + std::to_string(c.second));
@@ -364,6 +392,18 @@ void VerilogEmitter::emitWires(std::ostream& f) {
         f << "    wire " << sigName(gid) << "_in;\n";
     }
 
+    // Self-loop (1-tick pulse) latches
+    for (int gid : selfLoopLatches) {
+        auto c = groupCoord(gid);
+        f << "    reg  " << sigName(gid) << " = 1'b0;  // LATCH (self-loop pulse) [" << gid << "]\n";
+        if (selfLoopExtInputs[gid].empty()) {
+            f << "    reg  latch_" << c.first << "_" << c.second << "_prev = 1'b0;\n";
+        } else {
+            f << "    reg  ext_" << c.first << "_" << c.second << "_prev = 1'b0;\n";
+            f << "    wire ext_" << c.first << "_" << c.second << "_in;\n";
+        }
+    }
+
     // Clock registers & divider counters
     for (int gid : clockGroups) {
         f << "    reg  " << sigName(gid) << " = 1'b0;  // CLOCK [" << gid << "]\n";
@@ -396,6 +436,7 @@ void VerilogEmitter::emitComb(std::ostream& f) {
 
     // Latch combinational inputs
     for (int gid : latchGroups) {
+        if (selfLoopLatches.count(gid)) continue;
         std::string expr;
         if (latchBtnInputs.count(gid)) {
             auto c = groupCoord(gid);
@@ -506,6 +547,7 @@ void VerilogEmitter::emitSeq(std::ostream& f) {
 
     // Latches: Toggle on rising edge of input (T flip-flop)
     for (int gid : latchGroups) {
+        if (selfLoopLatches.count(gid)) continue;
         std::string inSig = sigName(gid) + "_in";
         std::string prevSig = sigName(gid) + "_prev";
         f << "            // LATCH [" << gid << "] - toggle on rising edge\n";
@@ -527,6 +569,55 @@ void VerilogEmitter::emitSeq(std::ostream& f) {
         f << "                " << cnt << " <= " << cnt << " + 32'd1;\n";
         f << "            end\n";
         f << "            " << sigName(gid) << " <= (" << cnt << " < 32'd" << (period / 2) << ");\n";
+    }
+
+    // Self-loop (1-tick pulse) latches
+    for (int gid : selfLoopLatches) {
+        auto c = groupCoord(gid);
+        int x = c.first, y = c.second;
+        if (selfLoopExtInputs[gid].empty()) {
+            f << "    // Self-loop (clickable) latch -> 1-tick pulse\n";
+            f << "    always @(posedge clk) begin\n";
+            f << "        if (rst) begin\n";
+            f << "            " << sigName(gid) << " <= 1'b0;\n";
+            f << "            latch_" << x << "_" << y << "_prev <= 1'b0;\n";
+            f << "        end else begin\n";
+            f << "            latch_" << x << "_" << y << "_prev <= latch_" << x << "_" << y << ";\n";
+            f << "            if (latch_" << x << "_" << y << " && !latch_" << x << "_" << y << "_prev)\n";
+            f << "                " << sigName(gid) << " <= 1'b1;\n";
+            f << "            else\n";
+            f << "                " << sigName(gid) << " <= 1'b0;\n";
+            f << "        end\n";
+            f << "    end\n\n";
+        } else {
+            // external expression
+            std::ostringstream extExpr;
+            const auto& exts = selfLoopExtInputs[gid];
+            if (exts.size() == 1) {
+                extExpr << sigName(exts[0]);
+            } else {
+                extExpr << "(";
+                for (size_t i = 0; i < exts.size(); i++) {
+                    if (i) extExpr << " ^ ";
+                    extExpr << sigName(exts[i]);
+                }
+                extExpr << ")";
+            }
+            f << "    wire ext_" << x << "_" << y << "_in = " << extExpr.str() << ";\n";
+            f << "    // Self-loop latch with external trigger -> 1-tick pulse\n";
+            f << "    always @(posedge clk) begin\n";
+            f << "        if (rst) begin\n";
+            f << "            " << sigName(gid) << " <= 1'b0;\n";
+            f << "            ext_" << x << "_" << y << "_prev <= 1'b0;\n";
+            f << "        end else begin\n";
+            f << "            ext_" << x << "_" << y << "_prev <= ext_" << x << "_" << y << "_in;\n";
+            f << "            if (ext_" << x << "_" << y << "_in && !ext_" << x << "_" << y << "_prev)\n";
+            f << "                " << sigName(gid) << " <= 1'b1;\n";
+            f << "            else\n";
+            f << "                " << sigName(gid) << " <= 1'b0;\n";
+            f << "        end\n";
+            f << "    end\n\n";
+        }
     }
 
     f << "        end\n";
