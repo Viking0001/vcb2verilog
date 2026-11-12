@@ -205,6 +205,7 @@ namespace openVCB {
 		std::string assembly;
 		LatchInterface vmAddr;
 		LatchInterface vmData;
+		LatchInterface vmWe;
 		uint32_t lastVMemAddr = 0;
 
 		~Project();

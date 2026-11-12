@@ -113,7 +113,10 @@ void VerilogEmitter::buildGraphInfo() {
         for (int i = 0; i < proj.vmData.numBits; i++) vmemDataGids.push_back(proj.vmData.gids[i]);
         // VCB exposes a single data bus; reuse it as write data.
         vmemWDataGids = vmemDataGids;
-        // Write enable is not provided by the current VCB vmem settings; leave empty (defaults to 1'b0).
+        // Write enable (if provided by the project)
+        if (proj.vmWe.numBits > 0 && proj.vmWe.gids[0] >= 0) {
+            vmemWeGids.push_back(proj.vmWe.gids[0]);
+        }
     }
 
     // Representative coordinate (first pixel in row-major order) for each group

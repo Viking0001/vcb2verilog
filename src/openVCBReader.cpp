@@ -399,6 +399,9 @@ namespace openVCB {
 		vmData.size.x = vmemArr[12];
 		vmData.size.y = vmemArr[13];
 
+		vmWe.numBits = 0;
+		vmWe.gids[0] = -1;
+
 		if (vmemFlag) {
 			vmemSize = 1ull << vmAddr.numBits;
 			vmem = new int[vmemSize];
@@ -535,6 +538,9 @@ namespace openVCB {
 		vmData.stride.y = vmemArr[11];
 		vmData.size.x = vmemArr[12];
 		vmData.size.y = vmemArr[13];
+
+		vmWe.numBits = 0;
+		vmWe.gids[0] = -1;
 
 		if (vmemFlag) {
 			vmemSize = 1ull << vmAddr.numBits;
