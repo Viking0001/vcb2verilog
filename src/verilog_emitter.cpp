@@ -169,7 +169,9 @@ void VerilogEmitter::analyzeGroups() {
             break;
 
         case Ink::LatchOff:
-            latchGroups.insert(gid);
+            if (!(hasVmem && std::find(vmemDataGids.begin(), vmemDataGids.end(), gid) != vmemDataGids.end())) {
+                latchGroups.insert(gid);
+            }
             if (reverseAdj[gid].empty()) {
                 // Latch has no internal driving inputs -> manual user button/switch
                 latchBtnInputs.insert(gid);
@@ -221,6 +223,16 @@ std::string VerilogEmitter::sigName(int gid) const {
     if (inputGroups.count(gid))  return "input_" + std::to_string(x) + "_" + std::to_string(y);
     if (outputGroups.count(gid)) return "output_" + std::to_string(x) + "_" + std::to_string(y);
     if (ledGroups.count(gid))    return "led_" + std::to_string(x) + "_" + std::to_string(y);
+    // Virtual memory data latches are driven by BRAM read data
+    if (hasVmem) {
+        for (size_t i = 0; i < vmemDataGids.size(); i++) {
+            if (vmemDataGids[i] == gid) {
+                int mx = proj.vmAddr.pos.x;
+                int my = proj.vmAddr.pos.y;
+                return "mem_rdata_" + std::to_string(mx) + "_" + std::to_string(my) + "[" + std::to_string(i) + "]";
+            }
+        }
+    }
     return "g_" + std::to_string(gid);
 }
 
