@@ -291,7 +291,7 @@ std::string VerilogEmitter::sigName(int gid) const {
     if (inputGroups.count(gid))  return "input_" + std::to_string(x) + "_" + std::to_string(y);
     if (outputGroups.count(gid)) return "output_" + std::to_string(x) + "_" + std::to_string(y);
     if (ledGroups.count(gid))    return "led_" + std::to_string(x) + "_" + std::to_string(y);
-    if (clockOffMode && latchBtnInputs.count(gid)) {
+    if (latchBtnInputs.count(gid)) {
         return "sw_" + std::to_string(x) + "_" + std::to_string(y);
     }
     // Virtual memory data latches are driven by BRAM read data
@@ -402,11 +402,7 @@ void VerilogEmitter::emitPorts(std::ostream& f, const std::string& moduleName) {
 
     for (int gid : latchBtnInputs) {
         auto c = groupCoord(gid);
-        if (clockOffMode) {
-            ports.push_back("    input  wire sw_" + std::to_string(c.first) + "_" + std::to_string(c.second));
-        } else {
-            ports.push_back("    input  wire btn_" + std::to_string(c.first) + "_" + std::to_string(c.second));
-        }
+        ports.push_back("    input  wire sw_" + std::to_string(c.first) + "_" + std::to_string(c.second));
     }
 
     for (int gid : outputGroups)
@@ -447,7 +443,7 @@ void VerilogEmitter::emitWires(std::ostream& f) {
 
     // Latch registers + edge-detect helpers (T flip-flops)
     for (int gid : latchGroups) {
-        if (clockOffMode && latchBtnInputs.count(gid)) continue;
+        if (latchBtnInputs.count(gid)) continue;
         f << "    reg  " << sigName(gid) << " = 1'b0;  // LATCH (T-FF) [" << gid << "]\n";
         f << "    reg  " << sigName(gid) << "_prev = 1'b0;\n";
         f << "    wire " << sigName(gid) << "_in;\n";
@@ -500,8 +496,8 @@ void VerilogEmitter::emitComb(std::ostream& f) {
     // Latch combinational inputs
     for (int gid : latchGroups) {
         if (selfLoopLatches.count(gid)) continue;
-        if (clockOffMode && latchBtnInputs.count(gid)) continue;
-        if (clockOffMode && latchBtnInputs.count(gid)) continue;
+        if (latchBtnInputs.count(gid)) continue;
+        if (latchBtnInputs.count(gid)) continue;
         std::string expr;
         if (latchBtnInputs.count(gid)) {
             auto c = groupCoord(gid);
@@ -658,8 +654,8 @@ void VerilogEmitter::emitSeq(std::ostream& f) {
     // Latches: Toggle on rising edge of input (T flip-flop)
     for (int gid : latchGroups) {
         if (selfLoopLatches.count(gid)) continue;
-        if (clockOffMode && latchBtnInputs.count(gid)) continue;
-        if (clockOffMode && latchBtnInputs.count(gid)) continue;
+        if (latchBtnInputs.count(gid)) continue;
+        if (latchBtnInputs.count(gid)) continue;
         std::string inSig = sigName(gid) + "_in";
         std::string prevSig = sigName(gid) + "_prev";
         f << "            // LATCH [" << gid << "] - toggle on rising edge\n";
