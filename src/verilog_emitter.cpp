@@ -543,8 +543,8 @@ void VerilogEmitter::emitSeq(std::ostream& f) {
         // address concatenation
         std::ostringstream addrExpr;
         addrExpr << "{";
-        for (size_t i = 0; i < vmemAddrGids.size(); i++) {
-            if (i) addrExpr << ", ";
+        for (int i = (int)vmemAddrGids.size() - 1; i >= 0; i--) {
+            if (i != (int)vmemAddrGids.size() - 1) addrExpr << ", ";
             addrExpr << sigName(vmemAddrGids[i]);
         }
         addrExpr << "}";
@@ -552,41 +552,56 @@ void VerilogEmitter::emitSeq(std::ostream& f) {
         f << "    reg [" << (dataW > 0 ? dataW-1 : 0) << ":0] " << memName
           << " [0:" << (depth-1) << "];\n";
         f << "    initial $readmemh(\"" << vmemMemFile << "\", " << memName << ");\n";
-        f << "    reg [" << (dataW > 0 ? dataW-1 : 0) << ":0] mem_rdata_"
+        f << "    reg  [" << (dataW > 0 ? dataW-1 : 0) << ":0] mem_rdata_"
+          << x << "_" << y << ";\n";
+        f << "    reg  [" << (dataW > 0 ? dataW-1 : 0) << ":0] mem_toggle_prev_"
           << x << "_" << y << ";\n";
         f << "    wire [" << (addrW > 0 ? addrW-1 : 0) << ":0] mem_addr_"
           << x << "_" << y << " = " << addrExpr.str() << ";\n";
 
-        // Toggle bus: incoming signals from the grid (original latch inputs)
+        // Toggle bus (MSB..LSB) with zero padding on the left
         std::ostringstream toggleExpr;
         toggleExpr << "{";
-        for (size_t i = 0; i < vmemDataGids.size(); i++) {
-            if (i) toggleExpr << ", ";
-            toggleExpr << combExpr(vmemDataGids[i], "^", "1'b0");
+        int pad = dataW - (int)vmemDataGids.size();
+        if (pad < 0) pad = 0;
+        bool first = true;
+        for (int p = 0; p < pad; p++) {
+            if (!first) toggleExpr << ", ";
+            toggleExpr << "1'b0";
+            first = false;
         }
+        for (int i = (int)vmemDataGids.size() - 1; i >= 0; i--) {
+            if (!first) toggleExpr << ", ";
+            toggleExpr << combExpr(vmemDataGids[i], "^", "1'b0");
+            first = false;
+        }
+        if (first) toggleExpr << (dataW > 0 ? std::to_string(dataW) + "'d0" : "1'b0");
         toggleExpr << "}";
         f << "    wire [" << (dataW > 0 ? dataW-1 : 0) << ":0] mem_toggle_"
           << x << "_" << y << " = " << toggleExpr.str() << ";\n";
 
-        // Write enable: active if any toggle bit is 1
-        f << "    wire mem_we_" << x << "_" << y << " = |mem_toggle_"
+        f << "    wire [" << (dataW > 0 ? dataW-1 : 0) << ":0] mem_toggle_pulse_"
+          << x << "_" << y << " = mem_toggle_" << x << "_" << y
+          << " & ~mem_toggle_prev_" << x << "_" << y << ";\n";
+        f << "    wire                mem_we_" << x << "_" << y << " = |mem_toggle_pulse_"
           << x << "_" << y << ";\n";
-
-        // Write data: read data XOR toggle
-        f << "    wire [" << (dataW > 0 ? dataW-1 : 0) << ":0] mem_wdata_"
-          << x << "_" << y << " = mem_rdata_" << x << "_" << y
-          << " ^ mem_toggle_" << x << "_" << y << ";\n";
+        f << "    wire [" << (dataW > 0 ? dataW-1 : 0) << ":0] mem_next_data_"
+          << x << "_" << y << " = " << memName << "[mem_addr_" << x << "_" << y
+          << "] ^ mem_toggle_pulse_" << x << "_" << y << ";\n";
 
         f << "    always @(posedge clk) begin\n";
         f << "        if (rst) begin\n";
         f << "            mem_rdata_" << x << "_" << y << " <= " << dataW << "'d0;\n";
+        f << "            mem_toggle_prev_" << x << "_" << y << " <= " << dataW << "'d0;\n";
         f << "        end else begin\n";
+        f << "            mem_toggle_prev_" << x << "_" << y << " <= mem_toggle_" << x << "_" << y << ";\n";
         f << "            if (mem_we_" << x << "_" << y << ") begin\n";
-        f << "                " << memName << "[mem_addr_" << x << "_" << y << "] <= mem_wdata_" << x << "_" << y << ";\n";
-        f << "            end\n";
-        f << "            // Synchronous read\n";
-        f << "            mem_rdata_" << x << "_" << y << " <= " << memName
+        f << "                " << memName << "[mem_addr_" << x << "_" << y << "] <= mem_next_data_" << x << "_" << y << ";\n";
+        f << "                mem_rdata_" << x << "_" << y << " <= mem_next_data_" << x << "_" << y << ";\n";
+        f << "            end else begin\n";
+        f << "                mem_rdata_" << x << "_" << y << " <= " << memName
           << "[mem_addr_" << x << "_" << y << "];\n";
+        f << "            end\n";
         f << "        end\n";
         f << "    end\n\n";
     }
