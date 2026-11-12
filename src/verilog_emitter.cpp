@@ -212,9 +212,14 @@ void VerilogEmitter::analyzeGroups() {
                 latchGroups.insert(gid);
             }
             if (reverseAdj[gid].empty() && !(hasVmem && std::find(vmemDataGids.begin(), vmemDataGids.end(), gid) != vmemDataGids.end())) {
-                // Latch has no internal driving inputs -> manual user button/switch
-                latchBtnInputs.insert(gid);
-                latchGroups.erase(gid);
+                // Only expose as switch if it actually drives something in the circuit
+                if (outDegree[gid] > 0) {
+                    latchBtnInputs.insert(gid);
+                    latchGroups.erase(gid);
+                } else {
+                    ignoredGroups.insert(gid);
+                    latchGroups.erase(gid);
+                }
             }
             break;
         }

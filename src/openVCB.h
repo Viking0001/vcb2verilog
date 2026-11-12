@@ -76,6 +76,9 @@ namespace openVCB {
 
 		numTypes,
 
+		Tunnel = 100,
+		Mesh = 101,
+
 		Trace = 129,
 		Read,
 		Write,

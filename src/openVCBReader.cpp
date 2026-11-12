@@ -175,9 +175,15 @@ namespace openVCB {
 			pix.ink = (int16_t)Ink::Filler;
 			break;
 
-		// Tunnel, Mesh and Bus components are treated as wire bundles (connectivity)
-		case 0x535572: // TUNNEL (83,85,114)
-		case 0x646a57: // MESH (100,106,87)
+		case 0x535572: // TUNNEL
+			pix.ink = (int16_t)Ink::Tunnel;
+			break;
+
+		case 0x646a57: // MESH
+			pix.ink = (int16_t)Ink::Mesh;
+			break;
+
+		// Bus components are treated as wire bundles (connectivity)
 		case 0x7a2f24: // BUS_0 (122,47,36)
 		case 0x3e7a24: // BUS_1 (62,122,36)
 		case 0x24417a: // BUS_2 (36,65,122)
