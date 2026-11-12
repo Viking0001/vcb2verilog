@@ -111,6 +111,9 @@ void VerilogEmitter::buildGraphInfo() {
     if (hasVmem) {
         for (int i = 0; i < proj.vmAddr.numBits; i++) vmemAddrGids.push_back(proj.vmAddr.gids[i]);
         for (int i = 0; i < proj.vmData.numBits; i++) vmemDataGids.push_back(proj.vmData.gids[i]);
+        // VCB exposes a single data bus; reuse it as write data.
+        vmemWDataGids = vmemDataGids;
+        // Write enable is not provided by the current VCB vmem settings; leave empty (defaults to 1'b0).
     }
 
     // Representative coordinate (first pixel in row-major order) for each group
@@ -539,11 +542,27 @@ void VerilogEmitter::emitSeq(std::ostream& f) {
         f << "    wire [" << (addrW > 0 ? addrW-1 : 0) << ":0] mem_addr_"
           << x << "_" << y << " = " << addrExpr.str() << ";\n";
 
-        // Write enable: default to 1'b0 if no WE pin is available
-        f << "    wire mem_we_" << x << "_" << y << " = 1'b0;\n";
-        // Write data: default to read-data bus if no dedicated write-data pins are available
+        // Write enable
+        std::string weExpr = "1'b0";
+        if (!vmemWeGids.empty() && vmemWeGids[0] >= 0) {
+            weExpr = sigName(vmemWeGids[0]);
+        }
+        f << "    wire mem_we_" << x << "_" << y << " = " << weExpr << ";\n";
+
+        // Write data bus concatenation
+        std::ostringstream wdataExpr;
+        if (!vmemWDataGids.empty()) {
+            wdataExpr << "{";
+            for (size_t i = 0; i < vmemWDataGids.size(); i++) {
+                if (i) wdataExpr << ", ";
+                wdataExpr << sigName(vmemWDataGids[i]);
+            }
+            wdataExpr << "}";
+        } else {
+            wdataExpr << (dataW > 0 ? std::to_string(dataW) + "'d0" : "1'b0");
+        }
         f << "    wire [" << (dataW > 0 ? dataW-1 : 0) << ":0] mem_wdata_"
-          << x << "_" << y << " = " << (dataW > 0 ? std::to_string(dataW) + "'d0" : "1'b0") << ";\n";
+          << x << "_" << y << " = " << wdataExpr.str() << ";\n";
 
         f << "    always @(posedge clk) begin\n";
         f << "        if (rst) begin\n";
