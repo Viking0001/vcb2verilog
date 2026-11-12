@@ -23,7 +23,8 @@ namespace openVCB {
 	void exploreBundle(ivec2 pos, int mask, InkPixel* image, int width, int height,
 		std::vector<int>& visited,
 		std::vector<ivec2>& stack, std::vector<ivec2>& bundleStack,
-		std::vector<ivec2>& readInks, std::vector<ivec2>& writeInks) {
+		std::vector<ivec2>& readInks, std::vector<ivec2>& writeInks,
+		const std::vector<ivec2>& meshPixels) {
 
 		bundleStack.push_back(pos);
 		visited[pos.x + pos.y * width] |= mask;
@@ -84,9 +85,19 @@ namespace openVCB {
 					newInk = image[np.x + np.y * width].getInk();
 				}
 
-				if (newInk == Ink::BundleOff) {
+				if (newInk == Ink::BundleOff || newInk == Ink::Mesh) {
 					visited[nidx] |= mask;
 					bundleStack.push_back(np);
+					if (newInk == Ink::Mesh) {
+						for (const auto& mp : meshPixels) {
+							int midx = mp.x + mp.y * width;
+							if (midx < 0 || midx >= width*height) continue;
+							if (!(visited[midx] & mask)) {
+								visited[midx] |= mask;
+								bundleStack.push_back(mp);
+							}
+						}
+					}
 				}
 			}
 		}
@@ -130,6 +141,12 @@ namespace openVCB {
 		indexImage = new int[width * height];
 		for (int i = 0, lim = width * height; i < lim; i++)
 			indexImage[i] = -1;
+
+		std::vector<ivec2> meshPixels;
+		for (int y = 0; y < height; y++)
+			for (int x = 0; x < width; x++)
+				if (image[x + y * width].getInk() == Ink::Mesh)
+					meshPixels.push_back(ivec2(x, y));
 
 		using Group = tuple<int, Logic, Ink>;
 		// This translates from morton ordering to sequential ordering
@@ -180,7 +197,7 @@ namespace openVCB {
 
 							// Handle wire bundles
 							Ink newInk = image[nidx].getInk();
-							if (ink == Ink::TraceOff && newInk == Ink::BundleOff) {
+							if (ink == Ink::TraceOff && (newInk == Ink::BundleOff || newInk == Ink::Mesh)) {
 								// Whoo wire bundles
 								// What kind of ink are we again? 
 								InkPixel npix = image[idx];
@@ -196,7 +213,7 @@ namespace openVCB {
 								if (nvis & mask) continue;
 
 								// Hold my beer, we're jumping in.
-								exploreBundle(np, mask, image, width, height, visited, stack, bundleStack, readInks, writeInks);
+								exploreBundle(np, mask, image, width, height, visited, stack, bundleStack, readInks, writeInks, meshPixels);
 
 								if (nvis & 1) {
 									// Try to insert new connection
@@ -218,6 +235,7 @@ namespace openVCB {
 								}
 								continue;
 							}
+
 
 							// Check ink type and handle crosses
 							if (newInk == Ink::Cross) {
