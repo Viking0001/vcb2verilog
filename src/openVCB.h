@@ -70,6 +70,8 @@ namespace openVCB {
 		LatchOff,
 		LedOff,
 		BundleOff,
+		TunnelOff,
+		MeshOff,
 
 		Filler,
 		Annotation,
@@ -96,6 +98,8 @@ namespace openVCB {
 		Latch,
 		Led,
 		Bundle,
+		Tunnel,
+		Mesh,
 
 		InvalidFiller,
 		InvalidAnnotation

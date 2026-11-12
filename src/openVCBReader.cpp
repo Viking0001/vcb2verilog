@@ -92,6 +92,8 @@ namespace openVCB {
 		"Latch (Off)",
 		"LED (Off)",
 		"Bundle (Off)",
+		"Tunnel (Off)",
+		"Mesh (Off)",
 
 		"Filler",
 		"Annotation",
@@ -118,6 +120,8 @@ namespace openVCB {
 		"Latch (On)",
 		"LED (On)",
 		"Bundle (On)",
+		"Tunnel (On)",
+		"Mesh (On)",
 
 		"UNDEFINED",
 		"UNDEFINED"
@@ -175,9 +179,15 @@ namespace openVCB {
 			pix.ink = (int16_t)Ink::Filler;
 			break;
 
-		// Tunnel, Mesh and Bus components are treated as wire bundles (connectivity)
-		case 0x535572: // TUNNEL (83,85,114)
-		case 0x646a57: // MESH (100,106,87)
+		case 0x535572: // TUNNEL
+			pix.ink = (int16_t)Ink::TunnelOff;
+			break;
+
+		case 0x646a57: // MESH
+			pix.ink = (int16_t)Ink::MeshOff;
+			break;
+
+		// Bus components are treated as wire bundles (connectivity)
 		case 0x7a2f24: // BUS_0 (122,47,36)
 		case 0x3e7a24: // BUS_1 (62,122,36)
 		case 0x24417a: // BUS_2 (36,65,122)

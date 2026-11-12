@@ -98,6 +98,13 @@ namespace openVCB {
 		for (int i = 0; i < width * height; i++) {
 			Ink ink = (Ink)image[i].ink;
 			switch (ink) {
+			case Ink::TunnelOff:
+			case Ink::MeshOff:
+			case Ink::Tunnel:
+			case Ink::Mesh:
+				ink = Ink::BundleOff;
+				image[i].ink = (int16_t)ink;
+				break;
 			case Ink::Trace:
 			case Ink::Read:
 			case Ink::Write:
@@ -180,7 +187,7 @@ namespace openVCB {
 
 							// Handle wire bundles
 							Ink newInk = image[nidx].getInk();
-							if (newInk == Ink::BundleOff) {
+							if (ink == Ink::TraceOff && newInk == Ink::BundleOff) {
 								// Whoo wire bundles
 								// What kind of ink are we again? 
 								InkPixel npix = image[idx];
@@ -347,14 +354,6 @@ namespace openVCB {
 			}
 		}
 		size_t numComp2Write = conSet.size();
-
-		// Connect all components sharing a bundle (Mesh/Tunnel/Bus/Cross-style virtual links)
-		for (auto& bc : bundleCons) {
-			long long key1 = ((long long)bc.first << 32) | (long long)bc.second;
-			if (conSet.insert(key1).second) conList.push_back({ bc.first, bc.second });
-			long long key2 = ((long long)bc.second << 32) | (long long)bc.first;
-			if (conSet.insert(key2).second) conList.push_back({ bc.second, bc.first });
-		}
 
 		// printf("Found %zd ink->comp and %zd comp->ink connections (%d total).\n", numRead2Comp, numComp2Write, numRead2Comp + numComp2Write);
 
