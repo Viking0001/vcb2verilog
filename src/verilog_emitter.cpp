@@ -519,6 +519,7 @@ void VerilogEmitter::emitComb(std::ostream& f) {
 
     // All combinational logic gates
     for (int gid : combGroups) {
+        if (latchBtnInputs.count(gid)) continue; // free latches are input ports, never driven
         Ink ink = setOff(proj.stateInks[gid]);
         Logic logic = inkLogicType(ink);
 
