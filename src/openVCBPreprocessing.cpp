@@ -98,13 +98,6 @@ namespace openVCB {
 		for (int i = 0; i < width * height; i++) {
 			Ink ink = (Ink)image[i].ink;
 			switch (ink) {
-			case Ink::TunnelOff:
-			case Ink::MeshOff:
-			case Ink::Tunnel:
-			case Ink::Mesh:
-				ink = Ink::BundleOff;
-				image[i].ink = (int16_t)ink;
-				break;
 			case Ink::Trace:
 			case Ink::Read:
 			case Ink::Write:
