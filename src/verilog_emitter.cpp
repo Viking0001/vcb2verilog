@@ -214,6 +214,7 @@ void VerilogEmitter::analyzeGroups() {
             if (reverseAdj[gid].empty() && !(hasVmem && std::find(vmemDataGids.begin(), vmemDataGids.end(), gid) != vmemDataGids.end())) {
                 // Latch has no internal driving inputs -> manual user button/switch
                 latchBtnInputs.insert(gid);
+                latchGroups.erase(gid);
             }
             break;
         }
@@ -261,8 +262,13 @@ void VerilogEmitter::detectCombinationalLoops() {
             if (color[v] == 0) {
                 dfs(v);
             } else if (color[v] == 1) {
-                // back edge -> break loop at current node
-                loopBreakGroups.insert(u);
+                // Treat gate-based feedback (SR latch etc.) as asynchronous: do not break with sync register
+                Ink ink = setOff(proj.stateInks[u]);
+                if (ink != Ink::AndOff && ink != Ink::OrOff && ink != Ink::NotOff &&
+                    ink != Ink::NorOff && ink != Ink::NandOff && ink != Ink::XorOff &&
+                    ink != Ink::XnorOff && ink != Ink::TraceOff && ink != Ink::BundleOff) {
+                    loopBreakGroups.insert(u);
+                }
             }
         }
         color[u] = 2;
