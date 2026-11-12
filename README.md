@@ -218,3 +218,18 @@ CLI switches:
 - `-O <level>`, `--opt-level <level>`: choose `opt` or `full`.
 
 This coordinate-based port naming (e.g. `input_X_Y`, `output_X_Y`, `led_X_Y`, `btn_X_Y`) is preserved through optimization and helps when mapping pins on an FPGA.
+
+
+## Virtual Memory (BRAM) Support
+
+Projects with VCB Virtual Memory enabled are emitted as a synthesizable Block RAM (BRAM) template:
+- `reg [DATA_WIDTH-1:0] mem_X_Y [0:DEPTH-1];`
+- `initial $readmemh("<module>_mem_X_Y.mem", mem_X_Y);`
+- synchronous read on `posedge clk`.
+
+An initialization file (`<module>_mem_X_Y.mem`) in hex format is generated next to the output `.v` file.
+
+CLI switch:
+- `--mem <file.vcbmem>` (or `-M <file.vcbmem>`): override the default memory contents stored in the `.vcb` file with an external `.vcbmem` binary file.
+
+Yosys optimization (`opt` and `full`) is compatible with the generated BRAM.
