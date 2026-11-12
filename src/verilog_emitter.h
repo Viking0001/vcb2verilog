@@ -22,6 +22,10 @@ public:
     /// Custom clock period (number of ticks per pulse)
     unsigned long long clockPeriod = 2;
 
+    /// Clock mode: auto, on, off
+    std::string clockMode = "auto";
+    bool clockOffMode = false;
+
     // Path to virtual memory init file (.mem) for $readmemh
     std::string vmemMemFile;
 
@@ -37,6 +41,7 @@ public:
     int getNumLatches() const { return (int)latchGroups.size(); }
     int getNumClocks() const { return (int)clockGroups.size(); }
     int getNumComb() const { return (int)combGroups.size(); }
+    bool hasSequentialElements() const;
 
     /// Sanitize arbitrary string into a valid Verilog identifier
     static std::string sanitizeIdentifier(const std::string& raw);

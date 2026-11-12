@@ -50,13 +50,31 @@ std::string VerilogEmitter::sanitizeIdentifier(const std::string& raw) {
 // Public entry point
 // ---------------------------------------------------------------------------
 
+bool VerilogEmitter::hasSequentialElements() const {
+    if (hasVmem) return true;
+    if (!bufferGroups.empty()) return true;
+    if (!clockGroups.empty()) return true;
+    if (!selfLoopLatches.empty()) return true;
+    for (int gid : latchGroups) {
+        if (!reverseAdj[gid].empty()) return true; // T-FF with input
+    }
+    return false;
+}
+
 bool VerilogEmitter::emit(const std::string& outputPath,
                           const std::string& moduleName) {
     buildGraphInfo();
     analyzeGroups();
 
     // Decide whether we need clk / rst
-    needsClk = !bufferGroups.empty() || !latchGroups.empty() || !clockGroups.empty();
+    if (clockMode == "on") {
+        needsClk = true;
+    } else if (clockMode == "off" && !hasVmem) {
+        needsClk = false;
+    } else {
+        needsClk = hasSequentialElements();
+    }
+    clockOffMode = !needsClk;
     needsRst = needsClk;
 
     std::string mod = sanitizeIdentifier(moduleName);
@@ -243,6 +261,9 @@ std::string VerilogEmitter::sigName(int gid) const {
     if (inputGroups.count(gid))  return "input_" + std::to_string(x) + "_" + std::to_string(y);
     if (outputGroups.count(gid)) return "output_" + std::to_string(x) + "_" + std::to_string(y);
     if (ledGroups.count(gid))    return "led_" + std::to_string(x) + "_" + std::to_string(y);
+    if (clockOffMode && latchBtnInputs.count(gid)) {
+        return "sw_" + std::to_string(x) + "_" + std::to_string(y);
+    }
     // Virtual memory data latches are driven by BRAM read data
     if (hasVmem) {
         for (size_t i = 0; i < vmemDataGids.size(); i++) {
@@ -351,7 +372,11 @@ void VerilogEmitter::emitPorts(std::ostream& f, const std::string& moduleName) {
 
     for (int gid : latchBtnInputs) {
         auto c = groupCoord(gid);
-        ports.push_back("    input  wire btn_" + std::to_string(c.first) + "_" + std::to_string(c.second));
+        if (clockOffMode) {
+            ports.push_back("    input  wire sw_" + std::to_string(c.first) + "_" + std::to_string(c.second));
+        } else {
+            ports.push_back("    input  wire btn_" + std::to_string(c.first) + "_" + std::to_string(c.second));
+        }
     }
 
     for (int gid : outputGroups)
@@ -387,12 +412,14 @@ void VerilogEmitter::emitWires(std::ostream& f) {
 
     // Latch registers + edge-detect helpers (T flip-flops)
     for (int gid : latchGroups) {
+        if (clockOffMode && latchBtnInputs.count(gid)) continue;
         f << "    reg  " << sigName(gid) << " = 1'b0;  // LATCH (T-FF) [" << gid << "]\n";
         f << "    reg  " << sigName(gid) << "_prev = 1'b0;\n";
         f << "    wire " << sigName(gid) << "_in;\n";
     }
 
     // Self-loop (1-tick pulse) latches
+    if (!clockOffMode) {
     for (int gid : selfLoopLatches) {
         auto c = groupCoord(gid);
         f << "    reg  " << sigName(gid) << " = 1'b0;  // LATCH (self-loop pulse) [" << gid << "]\n";
@@ -403,6 +430,7 @@ void VerilogEmitter::emitWires(std::ostream& f) {
             f << "    wire ext_" << c.first << "_" << c.second << "_in;\n";
         }
     }
+    } // clockOffMode guard
 
     // Clock registers & divider counters
     for (int gid : clockGroups) {
@@ -437,6 +465,8 @@ void VerilogEmitter::emitComb(std::ostream& f) {
     // Latch combinational inputs
     for (int gid : latchGroups) {
         if (selfLoopLatches.count(gid)) continue;
+        if (clockOffMode && latchBtnInputs.count(gid)) continue;
+        if (clockOffMode && latchBtnInputs.count(gid)) continue;
         std::string expr;
         if (latchBtnInputs.count(gid)) {
             auto c = groupCoord(gid);
@@ -548,6 +578,8 @@ void VerilogEmitter::emitSeq(std::ostream& f) {
     // Latches: Toggle on rising edge of input (T flip-flop)
     for (int gid : latchGroups) {
         if (selfLoopLatches.count(gid)) continue;
+        if (clockOffMode && latchBtnInputs.count(gid)) continue;
+        if (clockOffMode && latchBtnInputs.count(gid)) continue;
         std::string inSig = sigName(gid) + "_in";
         std::string prevSig = sigName(gid) + "_prev";
         f << "            // LATCH [" << gid << "] - toggle on rising edge\n";
@@ -572,6 +604,7 @@ void VerilogEmitter::emitSeq(std::ostream& f) {
     }
 
     // Self-loop (1-tick pulse) latches
+    if (!clockOffMode) {
     for (int gid : selfLoopLatches) {
         auto c = groupCoord(gid);
         int x = c.first, y = c.second;
@@ -622,6 +655,7 @@ void VerilogEmitter::emitSeq(std::ostream& f) {
 
     f << "        end\n";
     f << "    end\n\n";
+    } // end self-loop
 
     // Virtual memory (BRAM) template
     if (hasVmem) {

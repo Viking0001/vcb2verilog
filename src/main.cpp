@@ -5,6 +5,7 @@
 #include "openVCB.h"
 #include "verilog_emitter.h"
 
+#include <iomanip>
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -44,6 +45,7 @@ void printHelp(const char* progName) {
               << "      --no-opt               Disable automatic Yosys optimization of the output Verilog\n"
               << "  -O, --opt-level <level>    Optimization level: 'opt' (default) or 'full'\n"
               << "      --mem <file>           Override virtual memory contents with a .vcbmem file\n"
+              << "      --clock {auto,on,off}   Set clk/rst generation. 'auto' (default) detects sequential elements. 'off' combinational only. 'on' forced sync\n"
               << "  -h, --help                 Show this help message and exit\n"
               << "      --version              Show version information and exit\n\n"
               << "Note: By default the generated Verilog is optimized with Yosys (optional dependency).\n"
@@ -64,6 +66,7 @@ int main(int argc, char** argv) {
     bool optimize = true;
     std::string optLevel = "opt";
     std::string memFile;
+    std::string clockMode = "auto";
 
     // 1. Parse command line arguments
     for (int i = 1; i < argc; i++) {
@@ -94,6 +97,16 @@ int main(int argc, char** argv) {
                 return 1;
             }
             memFile = argv[i];
+        } else if (arg == "--clock") {
+            if (++i >= argc) {
+                std::cerr << "Error: Option " << arg << " requires a mode (auto, on, or off).\n";
+                return 1;
+            }
+            clockMode = argv[i];
+            if (clockMode != "auto" && clockMode != "on" && clockMode != "off") {
+                std::cerr << "Error: Unknown clock mode: \"" << clockMode << "\". Use 'auto', 'on', or 'off'.\n";
+                return 1;
+            }
         } else if (arg == "-v" || arg == "--verbose") {
             verbose = true;
         } else if (arg == "-e" || arg == "--expose-inputs") {
@@ -294,7 +307,7 @@ int main(int argc, char** argv) {
         std::ofstream memOut(memFilePath);
         if (memOut.is_open()) {
             for (size_t i = 0; i < proj.vmemSize; i++) {
-                memOut << std::hex << proj.vmem[i] << "\n";
+                memOut << std::hex << std::setw(8) << std::setfill('0') << proj.vmem[i] << std::dec << "\n";
             }
             memOut.close();
             std::cout << "Exported virtual memory init file: " << memFilePath << "\n";
@@ -309,7 +322,12 @@ int main(int argc, char** argv) {
     VerilogEmitter emitter(proj);
     emitter.exposeZeroInDegreeTraces = exposeInputs;
     emitter.clockPeriod = clockPeriod;
+    emitter.clockMode = clockMode;
     emitter.vmemMemFile = memFilePath.empty() ? std::string() : memFilePath;
+
+    if (clockMode == "off" && emitter.hasSequentialElements()) {
+        std::cout << "WARNING: Circuit contains sequential elements (e.g. T-flip-flops, memory), but clock mode is 'off'. These may not work correctly without 'clk'.\n";
+    }
 
     if (!emitter.emit(outputFile, moduleName)) {
         std::cerr << "Error: Failed to write Verilog output to: \"" << outputFile << "\"\n";
