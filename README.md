@@ -102,6 +102,8 @@ vcb2verilog -i <input.vcb> [-o <output.v>]
 | `-e, --expose-inputs` | *None* | Expose undriven traces as top-level `input wire` | Enabled |
 | `--no-expose-inputs` | *None* | Tie undriven traces to constant `1'b0` | Disabled |
 | `-v, --verbose` | *None* | Print detailed translation steps & netlist stats | Disabled |
+| `--no-opt` | *None* | Disable automatic Yosys optimization of the output Verilog | Disabled |
+| `-O, --opt-level` | `<level>` | Optimization level: `opt` (default) or `full` | `opt` |
 | `-h, --help` | *None* | Display help message and exit | |
 | `--version` | *None* | Display version information and exit | |
 
@@ -201,3 +203,18 @@ This project is inspired by and builds upon the file format concepts of [openVCB
 - Licensed under the **GNU General Public License v3.0 (GPL-3.0-or-later)**. See [LICENSE.md](LICENSE.md).
 - Based on the original open-source [openVCB](https://github.com/kittybupu/openVCB) parser by Jerry.
 - Virtual Circuit Board is developed by Corbinian. Available on [Steam](https://store.steampowered.com/app/1885690/Virtual_Circuit_Board/).
+
+
+## Output Optimization with Yosys
+
+By default, `vcb2verilog` runs the generated Verilog through **Yosys** (if available) to clean up and optimize the netlist. Yosys is an **optional dependency**: if it is not installed or not found in `PATH`, the tool prints a warning and keeps the raw (unoptimized) `.v` file.
+
+Optimization levels:
+- `opt` (default): quick cleanup using `proc; opt; opt_clean -purge`.
+- `full`: deeper logic optimization using ABC with `proc; opt -full; abc -g AND,OR,XOR,NAND,NOR,XNOR; opt_clean -purge`.
+
+CLI switches:
+- `--no-opt`: completely disable automatic Yosys optimization.
+- `-O <level>`, `--opt-level <level>`: choose `opt` or `full`.
+
+This coordinate-based port naming (e.g. `input_X_Y`, `output_X_Y`, `led_X_Y`, `btn_X_Y`) is preserved through optimization and helps when mapping pins on an FPGA.

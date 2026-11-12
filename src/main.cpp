@@ -56,6 +56,8 @@ int main(int argc, char** argv) {
     unsigned long long clockPeriod = 2;
     bool exposeInputs = true;
     bool verbose = false;
+    bool optimize = true;
+    std::string optLevel = "opt";
 
     // 1. Parse command line arguments
     for (int i = 1; i < argc; i++) {
@@ -68,6 +70,18 @@ int main(int argc, char** argv) {
         } else if (arg == "--version") {
             std::cout << "vcb2verilog version " << VERSION << "\n";
             return 0;
+        } else if (arg == "--no-opt") {
+            optimize = false;
+        } else if (arg == "--opt-level" || arg == "-O") {
+            if (++i >= argc) {
+                std::cerr << "Error: Option " << arg << " requires an optimization level (opt or full).\n";
+                return 1;
+            }
+            optLevel = argv[i];
+            if (optLevel != "opt" && optLevel != "full") {
+                std::cerr << "Error: Unknown optimization level: \"" << optLevel << "\". Use 'opt' or 'full'.\n";
+                return 1;
+            }
         } else if (arg == "-v" || arg == "--verbose") {
             verbose = true;
         } else if (arg == "-e" || arg == "--expose-inputs") {
@@ -220,6 +234,48 @@ int main(int argc, char** argv) {
     if (!emitter.emit(outputFile, moduleName)) {
         std::cerr << "Error: Failed to write Verilog output to: \"" << outputFile << "\"\n";
         return 1;
+    }
+
+    // Optional Yosys optimization of the generated Verilog
+    if (optimize && outputFile != "-") {
+        // Check whether yosys is available in PATH
+        if (std::system("command -v yosys > /dev/null 2>&1") != 0) {
+            std::cout << "Warning: 'yosys' not found in PATH. Skipping optimization; raw .v file kept.\n";
+        } else {
+            std::string script;
+            if (optLevel == "full") {
+                script = "proc; opt -full; abc -g AND,OR,XOR,NAND,NOR,XNOR; opt_clean -purge";
+            } else {
+                script = "proc; opt; opt_clean -purge";
+            }
+
+            std::string tmpFile = outputFile + ".yosys_tmp.v";
+            // Build shell command with quoted paths
+            std::string cmd = "yosys -q -p \"read_verilog " + outputFile +
+                              "; " + script + "; write_verilog -noattr " + tmpFile + "\" > /dev/null 2>&1";
+
+            std::cout << "Optimizing output with Yosys (level: " << optLevel << ")...\n";
+            int rc = std::system(cmd.c_str());
+            if (rc == 0) {
+                std::error_code ec;
+                if (std::filesystem::exists(tmpFile, ec)) {
+                    std::filesystem::remove(outputFile, ec);
+                    std::filesystem::rename(tmpFile, outputFile, ec);
+                    if (ec) {
+                        std::cout << "Warning: Yosys succeeded but could not replace output file: " << ec.message() << "\n";
+                        std::filesystem::remove(tmpFile, ec);
+                    } else {
+                        std::cout << "Yosys optimization completed successfully.\n";
+                    }
+                } else {
+                    std::cout << "Warning: Yosys finished but produced no output. Raw .v file kept.\n";
+                }
+            } else {
+                std::cout << "Warning: Yosys optimization failed (exit code " << rc << "). Raw .v file kept.\n";
+                std::error_code ec;
+                std::filesystem::remove(tmpFile, ec);
+            }
+        }
     }
 
     auto t1 = std::chrono::high_resolution_clock::now();
