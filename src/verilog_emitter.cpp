@@ -545,27 +545,25 @@ void VerilogEmitter::emitSeq(std::ostream& f) {
         f << "    wire [" << (addrW > 0 ? addrW-1 : 0) << ":0] mem_addr_"
           << x << "_" << y << " = " << addrExpr.str() << ";\n";
 
-        // Write enable
-        std::string weExpr = "1'b0";
-        if (!vmemWeGids.empty() && vmemWeGids[0] >= 0) {
-            weExpr = sigName(vmemWeGids[0]);
+        // Toggle bus: incoming signals from the grid (original latch inputs)
+        std::ostringstream toggleExpr;
+        toggleExpr << "{";
+        for (size_t i = 0; i < vmemDataGids.size(); i++) {
+            if (i) toggleExpr << ", ";
+            toggleExpr << combExpr(vmemDataGids[i], "^", "1'b0");
         }
-        f << "    wire mem_we_" << x << "_" << y << " = " << weExpr << ";\n";
+        toggleExpr << "}";
+        f << "    wire [" << (dataW > 0 ? dataW-1 : 0) << ":0] mem_toggle_"
+          << x << "_" << y << " = " << toggleExpr.str() << ";\n";
 
-        // Write data bus concatenation
-        std::ostringstream wdataExpr;
-        if (!vmemWDataGids.empty()) {
-            wdataExpr << "{";
-            for (size_t i = 0; i < vmemWDataGids.size(); i++) {
-                if (i) wdataExpr << ", ";
-                wdataExpr << sigName(vmemWDataGids[i]);
-            }
-            wdataExpr << "}";
-        } else {
-            wdataExpr << (dataW > 0 ? std::to_string(dataW) + "'d0" : "1'b0");
-        }
+        // Write enable: active if any toggle bit is 1
+        f << "    wire mem_we_" << x << "_" << y << " = |mem_toggle_"
+          << x << "_" << y << ";\n";
+
+        // Write data: read data XOR toggle
         f << "    wire [" << (dataW > 0 ? dataW-1 : 0) << ":0] mem_wdata_"
-          << x << "_" << y << " = " << wdataExpr.str() << ";\n";
+          << x << "_" << y << " = mem_rdata_" << x << "_" << y
+          << " ^ mem_toggle_" << x << "_" << y << ";\n";
 
         f << "    always @(posedge clk) begin\n";
         f << "        if (rst) begin\n";
