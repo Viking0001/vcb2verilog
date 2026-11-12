@@ -49,7 +49,9 @@ private:
     // Virtual memory (BRAM) support
     bool hasVmem = false;
     std::vector<int> vmemAddrGids;
-    std::vector<int> vmemDataGids;
+    std::vector<int> vmemDataGids;       // Read data
+    std::vector<int> vmemWeGids;         // Write enable (optional)
+    std::vector<int> vmemWDataGids;      // Write data (optional)
 
     // ---------- analysis results ----------
     std::set<int> inputGroups;     // READ / external traces → top-level input ports

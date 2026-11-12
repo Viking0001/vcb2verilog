@@ -538,10 +538,21 @@ void VerilogEmitter::emitSeq(std::ostream& f) {
           << x << "_" << y << ";\n";
         f << "    wire [" << (addrW > 0 ? addrW-1 : 0) << ":0] mem_addr_"
           << x << "_" << y << " = " << addrExpr.str() << ";\n";
+
+        // Write enable: default to 1'b0 if no WE pin is available
+        f << "    wire mem_we_" << x << "_" << y << " = 1'b0;\n";
+        // Write data: default to read-data bus if no dedicated write-data pins are available
+        f << "    wire [" << (dataW > 0 ? dataW-1 : 0) << ":0] mem_wdata_"
+          << x << "_" << y << " = " << (dataW > 0 ? std::to_string(dataW) + "'d0" : "1'b0") << ";\n";
+
         f << "    always @(posedge clk) begin\n";
         f << "        if (rst) begin\n";
         f << "            mem_rdata_" << x << "_" << y << " <= " << dataW << "'d0;\n";
         f << "        end else begin\n";
+        f << "            if (mem_we_" << x << "_" << y << ") begin\n";
+        f << "                " << memName << "[mem_addr_" << x << "_" << y << "] <= mem_wdata_" << x << "_" << y << ";\n";
+        f << "            end\n";
+        f << "            // Synchronous read\n";
         f << "            mem_rdata_" << x << "_" << y << " <= " << memName
           << "[mem_addr_" << x << "_" << y << "];\n";
         f << "        end\n";
