@@ -402,10 +402,47 @@ namespace openVCB {
 		vmWe.numBits = 0;
 		vmWe.gids[0] = -1;
 
+		vmWe.numBits = 0;
+		vmWe.gids[0] = -1;
+
 		if (vmemFlag) {
 			vmemSize = 1ull << vmAddr.numBits;
 			vmem = new int[vmemSize];
 			memset(vmem, 0, 4 * vmemSize);
+		}
+
+		// Load initial virtual memory contents from "vmem_data" (base64 + zstd)
+		if (vmemFlag) {
+			size_t vdPos = json.find("\"vmem_data\":");
+			if (vdPos != std::string::npos) {
+				size_t strStart = json.find("\"", vdPos);
+				if (strStart != std::string::npos) {
+					size_t strEnd = json.find("\"", strStart + 1);
+					if (strEnd != std::string::npos) {
+						std::string b64 = json.substr(strStart + 1, strEnd - strStart - 1);
+						if (!b64.empty()) {
+							std::vector<unsigned char> comp = b64decode(b64);
+							unsigned long long decompSize = ZSTD_getFrameContentSize(comp.data(), comp.size());
+							if (decompSize != ZSTD_CONTENTSIZE_ERROR &&
+								decompSize != ZSTD_CONTENTSIZE_UNKNOWN) {
+								std::vector<unsigned char> buf(decompSize);
+								size_t dSize = ZSTD_decompress(buf.data(), decompSize, comp.data(), comp.size());
+								if (!ZSTD_isError(dSize)) {
+									size_t numInts = dSize / 4;
+									size_t count = std::min(numInts, (size_t)vmemSize);
+									for (size_t i = 0; i < count; i++) {
+										unsigned int val = ((unsigned int)buf[i*4] << 24) |
+										                   ((unsigned int)buf[i*4+1] << 16) |
+										                   ((unsigned int)buf[i*4+2] << 8) |
+										                   ((unsigned int)buf[i*4+3]);
+										vmem[i] = (int)val;
+									}
+								}
+							}
+						}
+					}
+				}
+			}
 		}
 
 		if (!Project::processLogicData(logicData, 24)) {
@@ -538,6 +575,9 @@ namespace openVCB {
 		vmData.stride.y = vmemArr[11];
 		vmData.size.x = vmemArr[12];
 		vmData.size.y = vmemArr[13];
+
+		vmWe.numBits = 0;
+		vmWe.gids[0] = -1;
 
 		vmWe.numBits = 0;
 		vmWe.gids[0] = -1;
