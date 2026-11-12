@@ -8,6 +8,7 @@
 #include <iostream>
 #include <sstream>
 #include <algorithm>
+#include <functional>
 #include <ctime>
 #include <cctype>
 
@@ -55,6 +56,7 @@ bool VerilogEmitter::hasSequentialElements() const {
     if (!bufferGroups.empty()) return true;
     if (!clockGroups.empty()) return true;
     if (!selfLoopLatches.empty()) return true;
+    if (!loopBreakGroups.empty()) return true;
     for (int gid : latchGroups) {
         if (!reverseAdj[gid].empty()) return true; // T-FF with input
     }
@@ -240,6 +242,34 @@ void VerilogEmitter::analyzeGroups() {
             break;
         }
     }
+
+    detectCombinationalLoops();
+}
+
+
+void VerilogEmitter::detectCombinationalLoops() {
+    loopBreakGroups.clear();
+    std::vector<int> color(proj.numGroups, 0);
+    // recursive DFS
+    std::function<void(int)> dfs = [&](int u) {
+        color[u] = 1;
+        int start = proj.writeMap.ptr[u];
+        int end = proj.writeMap.ptr[u + 1];
+        for (int j = start; j < end; j++) {
+            int v = proj.writeMap.rows[j];
+            if (combGroups.count(v) == 0) continue; // stop at sequential/input boundaries
+            if (color[v] == 0) {
+                dfs(v);
+            } else if (color[v] == 1) {
+                // back edge -> break loop at current node
+                loopBreakGroups.insert(u);
+            }
+        }
+        color[u] = 2;
+    };
+    for (int gid : combGroups) {
+        if (color[gid] == 0) dfs(gid);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -402,7 +432,12 @@ void VerilogEmitter::emitWires(std::ostream& f) {
     // Combinational internal wires
     for (int gid : combGroups) {
         Ink ink = setOff(proj.stateInks[gid]);
-        f << "    wire " << sigName(gid) << ";  // " << inkTag(ink) << " [" << gid << "]\n";
+        if (loopBreakGroups.count(gid)) {
+            f << "    reg  " << sigName(gid) << " = 1'b0;  // Combinational loop breaker [" << gid << "]\n";
+            f << "    wire " << sigName(gid) << "_comb;\n";
+        } else {
+            f << "    wire " << sigName(gid) << ";  // " << inkTag(ink) << " [" << gid << "]\n";
+        }
     }
 
     // Buffer registers (D flip-flops)
@@ -536,8 +571,13 @@ void VerilogEmitter::emitComb(std::ostream& f) {
             break;
         }
 
-        f << "    assign " << sigName(gid) << " = " << expr
-          << ";  // " << comment << " [" << gid << "]\n";
+        if (loopBreakGroups.count(gid)) {
+            f << "    assign " << sigName(gid) << "_comb = " << expr
+              << ";  // " << comment << " [" << gid << "]\n";
+        } else {
+            f << "    assign " << sigName(gid) << " = " << expr
+              << ";  // " << comment << " [" << gid << "]\n";
+        }
     }
 
     f << "\n";
@@ -584,6 +624,10 @@ void VerilogEmitter::emitSeq(std::ostream& f) {
         f << "            " << sigName(gid) << "_prev <= 1'b0;\n";
     }
 
+    for (int gid : loopBreakGroups) {
+        f << "            " << sigName(gid) << " <= 1'b0;\n";
+    }
+
     for (int gid : clockGroups) {
         f << "            " << sigName(gid) << " <= 1'b0;\n";
         f << "            " << sigName(gid) << "_cnt <= 32'd0;\n";
@@ -622,6 +666,11 @@ void VerilogEmitter::emitSeq(std::ostream& f) {
         f << "            " << prevSig << " <= " << inSig << ";\n";
         f << "            if (" << inSig << " && !" << prevSig << ")\n";
         f << "                " << sigName(gid) << " <= ~" << sigName(gid) << ";\n";
+    }
+
+    // Combinational loop breakers: sample comb output on clock edge
+    for (int gid : loopBreakGroups) {
+        f << "            " << sigName(gid) << " <= " << sigName(gid) << "_comb;\n";
     }
 
     // Clocks: Parameterized frequency divider

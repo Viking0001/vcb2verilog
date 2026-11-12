@@ -328,6 +328,9 @@ int main(int argc, char** argv) {
     if (clockMode == "off" && emitter.hasSequentialElements()) {
         std::cout << "WARNING: Circuit contains sequential elements (e.g. T-flip-flops, memory), but clock mode is 'off'. These may not work correctly without 'clk'.\n";
     }
+    if (clockMode == "off" && emitter.getNumLoopBreaks() > 0) {
+        std::cout << "WARNING: Circuit contains combinational loop(s), but clock mode is 'off'. Raw feedback may cause 'x' states in simulation or synthesis errors.\n";
+    }
 
     if (!emitter.emit(outputFile, moduleName)) {
         std::cerr << "Error: Failed to write Verilog output to: \"" << outputFile << "\"\n";

@@ -10,6 +10,7 @@
 #include <fstream>
 #include <vector>
 #include <set>
+#include <unordered_set>
 #include <map>
 #include <utility>
 
@@ -41,7 +42,9 @@ public:
     int getNumLatches() const { return (int)latchGroups.size(); }
     int getNumClocks() const { return (int)clockGroups.size(); }
     int getNumComb() const { return (int)combGroups.size(); }
+    size_t getNumLoopBreaks() const { return loopBreakGroups.size(); }
     bool hasSequentialElements() const;
+    void detectCombinationalLoops();
 
     /// Sanitize arbitrary string into a valid Verilog identifier
     static std::string sanitizeIdentifier(const std::string& raw);
@@ -71,6 +74,7 @@ private:
     std::set<int> ignoredGroups;   // Filler, Annotation, Cross, None
     std::set<int> latchBtnInputs;  // Latches with no internal inputs -> external btn_GID
     std::set<int> selfLoopLatches;  // Latches with self-feedback -> 1-tick pulse
+    std::unordered_set<int> loopBreakGroups;  // Combinational loop breaker nodes
 
     bool needsClk = false;   // any sequential element present?
     bool needsRst = false;
