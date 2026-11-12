@@ -175,6 +175,18 @@ namespace openVCB {
 			pix.ink = (int16_t)Ink::Filler;
 			break;
 
+		// Tunnel, Mesh and Bus components are treated as wire bundles (connectivity)
+		case 0x535572: // TUNNEL (83,85,114)
+		case 0x646a57: // MESH (100,106,87)
+		case 0x7a2f24: // BUS_0 (122,47,36)
+		case 0x3e7a24: // BUS_1 (62,122,36)
+		case 0x24417a: // BUS_2 (36,65,122)
+		case 0x25627a: // BUS_3 (37,98,122)
+		case 0x7a2d66: // BUS_4 (122,45,102)
+		case 0x7a7024: // BUS_5 (122,112,36)
+			pix.ink = (int16_t)Ink::BundleOff;
+			break;
+
 		default:
 			for (int i = 0; i < 2 * (int)Ink::numTypes; i++)
 				if (colorPallet[i] == col) {
@@ -410,40 +422,61 @@ namespace openVCB {
 			vmem = new int[vmemSize];
 			memset(vmem, 0, 4 * vmemSize);
 		}
-
+		
 		// Load initial virtual memory contents from "vmem_data" (base64 + zstd)
-		if (vmemFlag) {
-			size_t vdPos = json.find("\"vmem_data\":");
-			if (vdPos != std::string::npos) {
-				size_t strStart = json.find("\"", vdPos);
-				if (strStart != std::string::npos) {
-					size_t strEnd = json.find("\"", strStart + 1);
-					if (strEnd != std::string::npos) {
-						std::string b64 = json.substr(strStart + 1, strEnd - strStart - 1);
-						if (!b64.empty()) {
-							std::vector<unsigned char> comp = b64decode(b64);
-							unsigned long long decompSize = ZSTD_getFrameContentSize(comp.data(), comp.size());
-							if (decompSize != ZSTD_CONTENTSIZE_ERROR &&
-								decompSize != ZSTD_CONTENTSIZE_UNKNOWN) {
-								std::vector<unsigned char> buf(decompSize);
-								size_t dSize = ZSTD_decompress(buf.data(), decompSize, comp.data(), comp.size());
-								if (!ZSTD_isError(dSize)) {
-									size_t numInts = dSize / 4;
-									size_t count = std::min(numInts, (size_t)vmemSize);
-									for (size_t i = 0; i < count; i++) {
-										unsigned int val = ((unsigned int)buf[i*4] << 24) |
-										                   ((unsigned int)buf[i*4+1] << 16) |
-										                   ((unsigned int)buf[i*4+2] << 8) |
-										                   ((unsigned int)buf[i*4+3]);
-										vmem[i] = (int)val;
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
+        if (vmemFlag) {
+            size_t vdPos = json.find("\"vmem_data\":");
+            if (vdPos != std::string::npos) {
+                size_t colonPos = json.find(":", vdPos);
+                size_t strStart = json.find("\"", colonPos);
+                if (strStart != std::string::npos) {
+                    size_t strEnd = json.find("\"", strStart + 1);
+                    if (strEnd != std::string::npos) {
+                        std::string b64 = json.substr(strStart + 1, strEnd - strStart - 1);
+                        b64.erase(std::remove_if(b64.begin(), b64.end(), ::isspace), b64.end());
+                        if (!b64.empty()) {
+                            std::vector<unsigned char> comp = b64decode(b64);
+                            if (!comp.empty()) {
+                                unsigned long long decompSize = ZSTD_getFrameContentSize(comp.data(), comp.size());
+                                if (decompSize == ZSTD_CONTENTSIZE_ERROR || decompSize == ZSTD_CONTENTSIZE_UNKNOWN) {
+                                    decompSize = 4194305;
+                                }
+                                
+                                std::vector<unsigned char> buf(decompSize);
+                                size_t dSize = 0;
+                                bool success = false;
+                                
+                                // Try decompressing while trimming trailing bytes to bypass base64 padding mismatch
+                                for (size_t trim = 0; trim <= 64 && comp.size() > trim; trim++) {
+                                    size_t srcSize = comp.size() - trim;
+                                    size_t res = ZSTD_decompress(buf.data(), decompSize, comp.data(), srcSize);
+                                    if (!ZSTD_isError(res)) {
+                                        dSize = res;
+                                        success = true;
+                                        break;
+                                    }
+                                }
+
+                                if (success) {
+                                    size_t numInts = dSize / 4;
+                                    size_t count = std::min(numInts, (size_t)vmemSize);
+                                    fprintf(stderr, "[DEBUG] Successfully decompressed vmem_data! Loaded %zu ints into vmem.\n", count);
+                                    for (size_t i = 0; i < count; i++) {
+                                        unsigned int val = ((unsigned int)buf[i*4] << 24) |
+                                                           ((unsigned int)buf[i*4+1] << 16) |
+                                                           ((unsigned int)buf[i*4+2] << 8) |
+                                                           ((unsigned int)buf[i*4+3]);
+                                        vmem[i] = (int)val;
+                                    }
+                                } else {
+                                    fprintf(stderr, "[DEBUG] Zstd decompress failed for vmem_data completely.\n");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
 		if (!Project::processLogicData(logicData, 24)) {
 			return false;
