@@ -619,7 +619,7 @@ void VerilogEmitter::emitSeq(std::ostream& f) {
                     }
                     extExpr << ")";
                 }
-                f << "    wire ext_" << x << "_" << y << "_in = " << extExpr.str() << ";\n";
+                f << "    assign ext_" << x << "_" << y << "_in = " << extExpr.str() << ";\n";
             }
         }
     }
@@ -751,7 +751,7 @@ void VerilogEmitter::emitSeq(std::ostream& f) {
             } else {
                 f << "            // Self-loop latch with external trigger -> 1-tick pulse\n";
                 f << "            ext_" << x << "_" << y << "_prev <= ext_" << x << "_" << y << "_in;\n";
-                f << "            if (ext_" << x << "_" << y << "_in && !ext_" << x << "_" << y << "_prev)\n";
+                f << "            if (ext_" << x << "_" << y << "_in ^ ext_" << x << "_" << y << "_prev)\n";
                 f << "                " << sigName(gid) << " <= 1'b1;\n";
                 f << "            else\n";
                 f << "                " << sigName(gid) << " <= 1'b0;\n";
