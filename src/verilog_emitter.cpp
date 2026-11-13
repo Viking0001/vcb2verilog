@@ -272,12 +272,26 @@ void VerilogEmitter::detectCombinationalLoops() {
             if (color[v] == 0) {
                 dfs(v);
             } else if (color[v] == 1) {
-                // Treat gate-based feedback (SR latch etc.) as asynchronous: do not break with sync register
+                // Break combinational loops only at real logic gates, never at TRACE/Led
                 Ink ink = setOff(proj.stateInks[u]);
-                if (ink != Ink::AndOff && ink != Ink::OrOff && ink != Ink::NotOff &&
-                    ink != Ink::NorOff && ink != Ink::NandOff && ink != Ink::XorOff &&
-                    ink != Ink::XnorOff && ink != Ink::TraceOff && ink != Ink::BundleOff) {
+                bool isGate = (ink == Ink::AndOff || ink == Ink::OrOff || ink == Ink::NotOff ||
+                               ink == Ink::NorOff || ink == Ink::NandOff || ink == Ink::XorOff ||
+                               ink == Ink::XnorOff || ink == Ink::BufferOff);
+                if (isGate) {
                     loopBreakGroups.insert(u);
+                } else {
+                    // if u is TRACE, break at a gate successor
+                    int start = proj.writeMap.ptr[u];
+                    int end = proj.writeMap.ptr[u + 1];
+                    for (int j = start; j < end; j++) {
+                        int w = proj.writeMap.rows[j];
+                        if (combGroups.count(w) == 0) continue;
+                        Ink inkW = setOff(proj.stateInks[w]);
+                        bool wIsGate = (inkW == Ink::AndOff || inkW == Ink::OrOff || inkW == Ink::NotOff ||
+                                        inkW == Ink::NorOff || inkW == Ink::NandOff || inkW == Ink::XorOff ||
+                                        inkW == Ink::XnorOff || inkW == Ink::BufferOff);
+                        if (wIsGate) { loopBreakGroups.insert(w); break; }
+                    }
                 }
             }
         }
