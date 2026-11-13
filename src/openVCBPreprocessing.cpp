@@ -144,24 +144,11 @@ namespace openVCB {
 #pragma omp parallel for schedule(static, 8192)
         for (int i = 0; i < width * height; i++) {
             Ink ink = (Ink)image[i].ink;
-            switch (ink) {
-            case Ink::Trace:
-            case Ink::Read:
-            case Ink::Write:
-            case Ink::Buffer:
-            case Ink::Or:
-            case Ink::And:
-            case Ink::Xor:
-            case Ink::Not:
-            case Ink::Nor:
-            case Ink::Nand:
-            case Ink::Xnor:
-            case Ink::Clock:
-            case Ink::Led:
-            case Ink::Bundle:
-                ink = setOff(ink);
-                image[i].ink = (int16_t)ink;
-            }
+            if (ink == Ink::Tunnel || ink == Ink::Mesh) {
+			image[i].ink = (int16_t)Ink::BundleOff;
+		} else {
+			image[i].ink = (int16_t)setOff(ink);
+		}
         }
 
         std::vector<int> visited(width * height, 0);
