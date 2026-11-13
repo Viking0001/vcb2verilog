@@ -178,7 +178,12 @@ void VerilogEmitter::analyzeGroups() {
         Ink ink = setOff(proj.stateInks[gid]);
         switch (ink) {
         case Ink::ReadOff:
-            inputGroups.insert(gid);
+            // Only expose as input if it actually drives something
+            if (outDegree[gid] > 0 || !reverseAdj[gid].empty()) {
+                inputGroups.insert(gid);
+            } else {
+                ignoredGroups.insert(gid);
+            }
             break;
 
         case Ink::WriteOff:
