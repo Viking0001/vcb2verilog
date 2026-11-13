@@ -45,7 +45,7 @@ void printHelp(const char* progName) {
               << "      --no-opt               Disable automatic Yosys optimization of the output Verilog\n"
               << "  -O, --opt-level <level>    Optimization level: 'opt' (default) or 'full'\n"
               << "      --mem <file>           Override virtual memory contents with a .vcbmem file\n"
-              << "      --clock {auto,on,off}   Set clk/rst generation. 'auto' (default) detects sequential elements. 'off' combinational only. 'on' forced sync\n"
+              << "      --clock {auto,on,off}   Set clk/rst generation. 'auto' (default) detects sequential elements. 'off' combinational only. 'on' forced sync\n                             Use --clock on for 100% correct behavior; default auto may break due to tick timing.\n"
               << "  -h, --help                 Show this help message and exit\n"
               << "      --version              Show version information and exit\n\n"
               << "Note: By default the generated Verilog is optimized with Yosys (optional dependency).\n"

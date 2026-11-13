@@ -233,3 +233,5 @@ CLI switch:
 - `--mem <file.vcbmem>` (or `-M <file.vcbmem>`): override the default memory contents stored in the `.vcb` file with an external `.vcbmem` binary file.
 
 Yosys optimization (`opt` and `full`) is compatible with the generated BRAM.
+
+Note: Use `--clock on` for guaranteed correct synchronous behavior. Default `auto` may break due to tick timing.
