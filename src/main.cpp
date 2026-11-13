@@ -323,6 +323,7 @@ int main(int argc, char** argv) {
     emitter.exposeZeroInDegreeTraces = exposeInputs;
     emitter.clockPeriod = clockPeriod;
     emitter.clockMode = clockMode;
+    emitter.registerAllGates = (clockMode == "on");
     emitter.vmemMemFile = memFilePath.empty() ? std::string() : memFilePath;
 
     if (clockMode == "off" && emitter.hasSequentialElements()) {

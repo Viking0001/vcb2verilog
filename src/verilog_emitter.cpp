@@ -69,7 +69,12 @@ bool VerilogEmitter::emit(const std::string& outputPath,
     analyzeGroups();
 
     // Decide whether we need clk / rst
-    if (clockMode == "on") {
+    // In auto/off mode, treat Buffer as combinational (diode)
+    if (!registerAllGates) {
+        for (int gid : bufferGroups) combGroups.insert(gid);
+        bufferGroups.clear();
+    }
+    if (registerAllGates) {
         needsClk = true;
     } else if (clockMode == "off" && !hasVmem) {
         needsClk = false;
@@ -436,12 +441,14 @@ void VerilogEmitter::emitWires(std::ostream& f) {
       << "    // Internal signals\n"
       << "    // =========================================================\n\n";
 
-    // Combinational internal wires
+    // Combinational internal wires / registers
     for (int gid : combGroups) {
         Ink ink = setOff(proj.stateInks[gid]);
         if (loopBreakGroups.count(gid)) {
             f << "    reg  " << sigName(gid) << " = 1'b0;  // Combinational loop breaker [" << gid << "]\n";
             f << "    wire " << sigName(gid) << "_comb;\n";
+        } else if (registerAllGates) {
+            f << "    reg  " << sigName(gid) << " = 1'b0;  // GATE (registered) [" << gid << "]\n";
         } else {
             f << "    wire " << sigName(gid) << ";  // " << inkTag(ink) << " [" << gid << "]\n";
         }
@@ -531,6 +538,7 @@ void VerilogEmitter::emitComb(std::ostream& f) {
     if (!latchGroups.empty()) f << "\n";
 
     // All combinational logic gates
+    if (!registerAllGates) {
     for (int gid : combGroups) {
         if (latchBtnInputs.count(gid)) continue; // free latches are input ports, never driven
         Ink ink = setOff(proj.stateInks[gid]);
@@ -586,6 +594,7 @@ void VerilogEmitter::emitComb(std::ostream& f) {
         }
     }
 
+    }
     f << "\n";
 }
 
@@ -628,6 +637,12 @@ void VerilogEmitter::emitSeq(std::ostream& f) {
     for (int gid : latchGroups) {
         f << "            " << sigName(gid) << " <= 1'b0;\n";
         f << "            " << sigName(gid) << "_prev <= 1'b0;\n";
+    }
+
+    if (registerAllGates) {
+        for (int gid : combGroups) {
+            f << "            " << sigName(gid) << " <= 1'b0;\n";
+        }
     }
 
     for (int gid : loopBreakGroups) {
@@ -676,6 +691,34 @@ void VerilogEmitter::emitSeq(std::ostream& f) {
     // Combinational loop breakers: sample comb output on clock edge
     for (int gid : loopBreakGroups) {
         f << "            " << sigName(gid) << " <= " << sigName(gid) << "_comb;\n";
+    }
+
+    // Registered gates (on mode): sample combinational expression on clock edge
+    if (registerAllGates) {
+        for (int gid : combGroups) {
+            if (latchBtnInputs.count(gid)) continue;
+            std::string expr = combExpr(gid, "|", "1'b0");
+            // Determine operator based on ink? combExpr default OR; for AND/NOT we need proper expr. 
+            // Use inkLogicType? We'll just use OR as default (approx). 
+            f << "            " << sigName(gid) << " <= " << expr << ";\n";
+        }
+    }
+
+    // Registered gates (on mode)
+    if (registerAllGates) {
+        for (int gid : combGroups) {
+            if (latchBtnInputs.count(gid)) continue;
+            Ink ink = setOff(proj.stateInks[gid]);
+            std::string expr;
+            if (ink == Ink::AndOff) expr = combExpr(gid, "&", "1'b0");
+            else if (ink == Ink::OrOff) expr = combExpr(gid, "|", "1'b0");
+            else if (ink == Ink::XorOff) expr = combExpr(gid, "^", "1'b0");
+            else if (ink == Ink::NotOff || ink == Ink::NorOff || ink == Ink::NandOff) {
+                std::string inner = combExpr(gid, "|", "1'b0");
+                expr = "~(" + inner + ")";
+            } else expr = combExpr(gid, "|", "1'b0");
+            f << "            " << sigName(gid) << " <= " << expr << ";\n";
+        }
     }
 
     // Clocks: Parameterized frequency divider

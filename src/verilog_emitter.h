@@ -26,6 +26,7 @@ public:
     /// Clock mode: auto, on, off
     std::string clockMode = "auto";
     bool clockOffMode = false;
+    bool registerAllGates = false;
 
     // Path to virtual memory init file (.mem) for $readmemh
     std::string vmemMemFile;
