@@ -75,7 +75,6 @@ namespace openVCB {
 		Annotation,
 
 		numTypes,
-
 		Tunnel = 100,
 		Mesh = 101,
 
