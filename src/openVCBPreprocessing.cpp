@@ -175,6 +175,9 @@ namespace openVCB {
         unordered_multimap<int, int> bundleCons;
         unordered_set<long long> bundleConsSet;
 
+        std::vector<int> busVisited(width * height, 0);
+        int busGen = 0;
+
         // Connected Components Search
         for (int y = 0; y < height; y++)
             for (int x = 0; x < width; x++)
@@ -280,10 +283,10 @@ namespace openVCB {
                                      ink != Ink::Mesh && ink != Ink::Tunnel &&
                                      (newInk == Ink::BundleOff || newInk == Ink::Mesh || newInk == Ink::Tunnel)) {
                                 // Merge same-type components connected via BUS / Mesh / Tunnel
-                                const int gateBusBit = (1 << 20);
-                                if (!(visited[nidx] & gateBusBit)) {
+                                ++busGen;
+                                if (busVisited[nidx] != busGen) {
                                     std::vector<ivec2> gBusStack = { np };
-                                    visited[nidx] |= gateBusBit;
+                                    busVisited[nidx] = busGen;
 
                                     while (!gBusStack.empty()) {
                                         ivec2 bp = gBusStack.back();
@@ -302,8 +305,8 @@ namespace openVCB {
                                                 stack.push_back(bnp);
                                             }
                                             else if ((bInk == Ink::BundleOff || bInk == Ink::Mesh || bInk == Ink::Tunnel) &&
-                                                     !(visited[bnidx] & gateBusBit)) {
-                                                visited[bnidx] |= gateBusBit;
+                                                     busVisited[bnidx] != busGen) {
+                                                busVisited[bnidx] = busGen;
                                                 gBusStack.push_back(bnp);
                                             }
                                         }
