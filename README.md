@@ -235,3 +235,5 @@ CLI switch:
 Yosys optimization (`opt` and `full`) is compatible with the generated BRAM.
 
 Note: Use `--clock on` for guaranteed correct synchronous behavior. Default `auto` may break due to tick timing.
+
+Run tests: `python3 tests/run_tests.py`
