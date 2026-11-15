@@ -439,28 +439,107 @@ namespace openVCB {
             }
         }
 
-        // Direct adjacent gate-gate edges
-        auto isGate2 = [](Ink in) {
+        // isLogicGate helper
+        auto isLogicGate = [](Ink in) {
             in = setOff(in);
             return in == Ink::AndOff || in == Ink::OrOff || in == Ink::XorOff ||
                    in == Ink::NotOff || in == Ink::NandOff || in == Ink::NorOff ||
-                   in == Ink::XnorOff || in == Ink::BufferOff || in == Ink::LatchOff ||
-                   in == Ink::ClockOff;
+                   in == Ink::XnorOff || in == Ink::BufferOff;
         };
+
+        // 1. One-way gate -> Bundle edges
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 Ink curInk = image[x + y * width].getInk();
                 int curGid = indexImage[x + y * width];
                 if (curGid < 0) continue;
-                if (!isGate2(curInk) && curInk != Ink::LedOff) continue;
+                if (!isLogicGate(curInk)) continue;
                 for (int k = 0; k < 4; k++) {
                     ivec2 np = ivec2(x, y) + fourNeighbors[k];
                     if (np.x < 0 || np.x >= width || np.y < 0 || np.y >= height) continue;
                     Ink nInk = image[np.x + np.y * width].getInk();
                     int nGid = indexImage[np.x + np.y * width];
                     if (nGid < 0 || nGid == curGid) continue;
-                    bool nIsGate = isGate2(nInk) || nInk == Ink::LedOff;
-                    if (nIsGate) {
+                    if (nInk == Ink::BundleOff) {
+                        if (conSet.insert(((long long)curGid << 32) | nGid).second)
+                            conList.push_back({ curGid, nGid });
+                    }
+                }
+            }
+        }
+
+        // 2. BFS depth for gate ordering
+        std::vector<int> gateDepth(writeMap.n, -1);
+        // sources: non-gate groups
+        for (int g = 0; g < writeMap.n; g++) {
+            if (!isLogicGate(setOff(stateInks[g]))) {
+                gateDepth[g] = 0;
+            }
+        }
+        // Build adjacency from conList
+        std::vector<std::vector<int>> adj(writeMap.n);
+        for (auto& e : conList) {
+            if (e.first >= 0 && e.first < writeMap.n && e.second >= 0 && e.second < writeMap.n)
+                adj[e.first].push_back(e.second);
+        }
+        // BFS over conList
+        {
+            std::vector<int> q;
+            for (int g = 0; g < writeMap.n; g++) if (gateDepth[g] == 0) q.push_back(g);
+            size_t qi = 0;
+            while (qi < q.size()) {
+                int u = q[qi++];
+                for (int v : adj[u]) {
+                    if (gateDepth[v] == -1) {
+                        gateDepth[v] = gateDepth[u] + 1;
+                        q.push_back(v);
+                    }
+                }
+            }
+        }
+        // Expand through adjacent gate pixels
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    Ink curInk = image[x + y * width].getInk();
+                    int curGid = indexImage[x + y * width];
+                    if (curGid < 0 || !isLogicGate(curInk)) continue;
+                    for (int k = 0; k < 4; k++) {
+                        ivec2 np = ivec2(x, y) + fourNeighbors[k];
+                        if (np.x < 0 || np.x >= width || np.y < 0 || np.y >= height) continue;
+                        Ink nInk = image[np.x + np.y * width].getInk();
+                        int nGid = indexImage[np.x + np.y * width];
+                        if (nGid < 0 || nGid == curGid || !isLogicGate(nInk)) continue;
+                        if (gateDepth[curGid] >= 0 && gateDepth[nGid] == -1) {
+                            gateDepth[nGid] = gateDepth[curGid] + 1;
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+        // For gates still -1, set 0
+        for (int g = 0; g < writeMap.n; g++) {
+            if (isLogicGate(setOff(stateInks[g])) && gateDepth[g] == -1) gateDepth[g] = 0;
+        }
+
+        // Add directed gate-gate edges based on depth
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                Ink curInk = image[x + y * width].getInk();
+                int curGid = indexImage[x + y * width];
+                if (curGid < 0) continue;
+                if (!isLogicGate(curInk)) continue;
+                for (int k = 0; k < 4; k++) {
+                    ivec2 np = ivec2(x, y) + fourNeighbors[k];
+                    if (np.x < 0 || np.x >= width || np.y < 0 || np.y >= height) continue;
+                    Ink nInk = image[np.x + np.y * width].getInk();
+                    int nGid = indexImage[np.x + np.y * width];
+                    if (nGid < 0 || nGid == curGid) continue;
+                    if (!isLogicGate(nInk) && nInk != Ink::LedOff) continue;
+                    if (gateDepth[curGid] < gateDepth[nGid]) {
                         if (conSet.insert(((long long)curGid << 32) | nGid).second)
                             conList.push_back({ curGid, nGid });
                     }
