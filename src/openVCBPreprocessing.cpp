@@ -356,6 +356,7 @@ namespace openVCB {
         // Hash sets to keep track of unique connections
         unordered_set<long long> conSet;
         std::vector<std::pair<int, int>> conList;
+        std::vector<std::vector<int>> bundleWriteSources(writeMap.n);
 
         // Add connections from inks to components
         for (ivec2 p : readInks) {
@@ -401,8 +402,7 @@ namespace openVCB {
 
                     for (auto itr = range.first; itr != range.second; itr++) {
                         int bundleID = writeMap.ptr[itr->second];
-                        if (conSet.insert(((long long)srcGID << 32) | bundleID).second)
-                            conList.push_back({ srcGID, bundleID });
+                        bundleWriteSources[bundleID].push_back(srcGID);
                     }
                 }
             }
@@ -561,25 +561,11 @@ namespace openVCB {
         std::vector<int> origInDeg(writeMap.n, 0);
         for (auto& e : conList) origInDeg[e.second]++;
 
-        // Pass A: powered gates write into BundleOff
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                Ink curInk = image[x + y * width].getInk();
-                int curGid = indexImage[x + y * width];
-                if (curGid < 0) continue;
-                if (!isLogicGate2(curInk)) continue;
-                if (inDeg[curGid] == 0) continue;
-                for (int k = 0; k < 4; k++) {
-                    ivec2 np = ivec2(x, y) + fourNeighbors[k];
-                    if (np.x < 0 || np.x >= width || np.y < 0 || np.y >= height) continue;
-                    Ink nInk = image[np.x + np.y * width].getInk();
-                    int nGid = indexImage[np.x + np.y * width];
-                    if (nGid < 0 || nGid == curGid) continue;
-                    if (nInk != Ink::BundleOff) continue;
-                    if (origInDeg[nGid] != 0) continue;
-                    if (conSet.insert(((long long)curGid << 32) | nGid).second)
-                        conList.push_back({ curGid, nGid });
-                }
+        // Add W->bundle edges from bundleWriteSources
+        for (int b = 0; b < writeMap.n; b++) {
+            for (int src : bundleWriteSources[b]) {
+                if (conSet.insert(((long long)src << 32) | b).second)
+                    conList.push_back({ src, b });
             }
         }
 
@@ -602,12 +588,7 @@ namespace openVCB {
                     int nGid = indexImage[np.x + np.y * width];
                     if (nGid < 0 || nGid == curGid) continue;
                     if (!isLogicGate2(nInk)) continue;
-                    // ensure gate doesn't already write to this bundle
-                    bool alreadyWrites = false;
-                    for (auto& e : conList) {
-                        if (e.first == nGid && e.second == curGid) { alreadyWrites = true; break; }
-                    }
-                    if (alreadyWrites) continue;
+                    if (inDeg[nGid] >= 2) continue;
                     if (isReachable(nGid, curGid)) continue;
                     if (conSet.insert(((long long)curGid << 32) | nGid).second)
                         conList.push_back({ curGid, nGid });
