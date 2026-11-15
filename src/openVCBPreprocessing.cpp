@@ -557,6 +557,10 @@ namespace openVCB {
                    in == Ink::XnorOff || in == Ink::BufferOff;
         };
 
+        // origInDeg before Pass A
+        std::vector<int> origInDeg(writeMap.n, 0);
+        for (auto& e : conList) origInDeg[e.second]++;
+
         // Pass A: powered gates write into BundleOff
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
@@ -572,6 +576,7 @@ namespace openVCB {
                     int nGid = indexImage[np.x + np.y * width];
                     if (nGid < 0 || nGid == curGid) continue;
                     if (nInk != Ink::BundleOff) continue;
+                    if (origInDeg[nGid] != 0) continue;
                     if (conSet.insert(((long long)curGid << 32) | nGid).second)
                         conList.push_back({ curGid, nGid });
                 }
