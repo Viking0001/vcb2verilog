@@ -440,94 +440,8 @@ namespace openVCB {
         }
 
         // isLogicGate helper
-        auto isLogicGate = [](Ink in) {
-            in = setOff(in);
-            return in == Ink::AndOff || in == Ink::OrOff || in == Ink::XorOff ||
-                   in == Ink::NotOff || in == Ink::NandOff || in == Ink::NorOff ||
-                   in == Ink::XnorOff || in == Ink::BufferOff;
-        };
-
-        // 2. BFS depth for gate ordering
-        std::vector<int> gateDepth(writeMap.n, -1);
-        // sources: non-gate groups
-        for (int g = 0; g < writeMap.n; g++) {
-            if (!isLogicGate(setOff(stateInks[g]))) {
-                gateDepth[g] = 0;
-            }
-        }
-        // Build adjacency from conList
-        std::vector<std::vector<int>> adj(writeMap.n);
-        for (auto& e : conList) {
-            if (e.first >= 0 && e.first < writeMap.n && e.second >= 0 && e.second < writeMap.n)
-                adj[e.first].push_back(e.second);
-        }
-        // BFS over conList
-        {
-            std::vector<int> q;
-            for (int g = 0; g < writeMap.n; g++) if (gateDepth[g] == 0) q.push_back(g);
-            size_t qi = 0;
-            while (qi < q.size()) {
-                int u = q[qi++];
-                for (int v : adj[u]) {
-                    if (gateDepth[v] == -1) {
-                        gateDepth[v] = gateDepth[u] + 1;
-                        q.push_back(v);
-                    }
-                }
-            }
-        }
-        // Expand through adjacent gate pixels
-        bool changed = true;
-        while (changed) {
-            changed = false;
-            for (int y = 0; y < height; y++) {
-                for (int x = 0; x < width; x++) {
-                    Ink curInk = image[x + y * width].getInk();
-                    int curGid = indexImage[x + y * width];
-                    if (curGid < 0 || !isLogicGate(curInk)) continue;
-                    for (int k = 0; k < 4; k++) {
-                        ivec2 np = ivec2(x, y) + fourNeighbors[k];
-                        if (np.x < 0 || np.x >= width || np.y < 0 || np.y >= height) continue;
-                        Ink nInk = image[np.x + np.y * width].getInk();
-                        int nGid = indexImage[np.x + np.y * width];
-                        if (nGid < 0 || nGid == curGid || !isLogicGate(nInk)) continue;
-                        if (gateDepth[curGid] >= 0 && gateDepth[nGid] == -1) {
-                            gateDepth[nGid] = gateDepth[curGid] + 1;
-                            changed = true;
-                        }
-                    }
-                }
-            }
-        }
-        // For gates still -1, set 0
-        for (int g = 0; g < writeMap.n; g++) {
-            if (isLogicGate(setOff(stateInks[g])) && gateDepth[g] == -1) gateDepth[g] = 0;
-        }
-
-        // Add directed gate-gate edges based on depth
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                Ink curInk = image[x + y * width].getInk();
-                int curGid = indexImage[x + y * width];
-                if (curGid < 0) continue;
-                if (!isLogicGate(curInk)) continue;
-                for (int k = 0; k < 4; k++) {
-                    ivec2 np = ivec2(x, y) + fourNeighbors[k];
-                    if (np.x < 0 || np.x >= width || np.y < 0 || np.y >= height) continue;
-                    Ink nInk = image[np.x + np.y * width].getInk();
-                    int nGid = indexImage[np.x + np.y * width];
-                    if (nGid < 0 || nGid == curGid) continue;
-                    if (!isLogicGate(nInk) && nInk != Ink::LedOff) continue;
-                    if (gateDepth[curGid] < gateDepth[nGid]) {
-                        if (conSet.insert(((long long)curGid << 32) | nGid).second)
-                            conList.push_back({ curGid, nGid });
-                    }
-                }
-            }
-        }
-
-        // Pass A: powered gates write into BundleOff
-        auto isLogicGate3 = [](Ink in) {
+        // Pass A: powered gates (inDeg >= 2) write into BundleOff (inDeg bundle == 0)
+        auto isLogicGate4 = [](Ink in) {
             in = setOff(in);
             return in == Ink::AndOff || in == Ink::OrOff || in == Ink::XorOff ||
                    in == Ink::NotOff || in == Ink::NandOff || in == Ink::NorOff ||
@@ -540,8 +454,8 @@ namespace openVCB {
                 Ink curInk = image[x + y * width].getInk();
                 int curGid = indexImage[x + y * width];
                 if (curGid < 0) continue;
-                if (!isLogicGate3(curInk)) continue;
-                if (inDegA[curGid] == 0) continue;
+                if (!isLogicGate4(curInk)) continue;
+                if (inDegA[curGid] < 2) continue;
                 for (int k = 0; k < 4; k++) {
                     ivec2 np = ivec2(x, y) + fourNeighbors[k];
                     if (np.x < 0 || np.x >= width || np.y < 0 || np.y >= height) continue;
@@ -580,7 +494,7 @@ namespace openVCB {
             return false;
         };
 
-        // Pass B: BundleOff -> gate reads
+        // Pass B: BundleOff -> gate reads (gate inDeg < 2)
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 Ink curInk = image[x + y * width].getInk();
@@ -594,13 +508,13 @@ namespace openVCB {
                     Ink nInk = image[np.x + np.y * width].getInk();
                     int nGid = indexImage[np.x + np.y * width];
                     if (nGid < 0 || nGid == curGid) continue;
-                    if (!isLogicGate3(nInk)) continue;
+                    if (!isLogicGate4(nInk)) continue;
                     bool alreadyWrites = false;
                     for (auto& e : conList) {
                         if (e.first == nGid && e.second == curGid) { alreadyWrites = true; break; }
                     }
                     if (alreadyWrites) continue;
-                    if (inDeg[nGid] >= 2) continue;
+                    if (inDeg[nGid] != 0) continue;
                     if (isReachable(nGid, curGid)) continue;
                     if (conSet.insert(((long long)curGid << 32) | nGid).second)
                         conList.push_back({ curGid, nGid });
