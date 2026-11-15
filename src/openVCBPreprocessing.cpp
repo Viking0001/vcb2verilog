@@ -439,30 +439,28 @@ namespace openVCB {
             }
         }
 
-        // Direct gate <-> bundle edges
-        auto isGate = [](Ink in) {
+        // Direct adjacent gate-gate edges
+        auto isGate2 = [](Ink in) {
             in = setOff(in);
             return in == Ink::AndOff || in == Ink::OrOff || in == Ink::XorOff ||
                    in == Ink::NotOff || in == Ink::NandOff || in == Ink::NorOff ||
                    in == Ink::XnorOff || in == Ink::BufferOff || in == Ink::LatchOff ||
-                   in == Ink::ClockOff || in == Ink::LedOff;
+                   in == Ink::ClockOff;
         };
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 Ink curInk = image[x + y * width].getInk();
                 int curGid = indexImage[x + y * width];
                 if (curGid < 0) continue;
+                if (!isGate2(curInk) && curInk != Ink::LedOff) continue;
                 for (int k = 0; k < 4; k++) {
                     ivec2 np = ivec2(x, y) + fourNeighbors[k];
                     if (np.x < 0 || np.x >= width || np.y < 0 || np.y >= height) continue;
                     Ink nInk = image[np.x + np.y * width].getInk();
                     int nGid = indexImage[np.x + np.y * width];
                     if (nGid < 0 || nGid == curGid) continue;
-                    if (curInk != Ink::BundleOff && isGate(curInk) && nInk == Ink::BundleOff) {
-                        if (conSet.insert(((long long)curGid << 32) | nGid).second)
-                            conList.push_back({ curGid, nGid });
-                    }
-                    if (curInk == Ink::BundleOff && isGate(nInk)) {
+                    bool nIsGate = isGate2(nInk) || nInk == Ink::LedOff;
+                    if (nIsGate) {
                         if (conSet.insert(((long long)curGid << 32) | nGid).second)
                             conList.push_back({ curGid, nGid });
                     }
