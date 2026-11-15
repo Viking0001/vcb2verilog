@@ -557,7 +557,32 @@ namespace openVCB {
                    in == Ink::XnorOff || in == Ink::BufferOff;
         };
 
-        // Safe one-way BundleOff -> gate edges
+        // Pass A: powered gates write into BundleOff
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                Ink curInk = image[x + y * width].getInk();
+                int curGid = indexImage[x + y * width];
+                if (curGid < 0) continue;
+                if (!isLogicGate2(curInk)) continue;
+                if (inDeg[curGid] == 0) continue;
+                for (int k = 0; k < 4; k++) {
+                    ivec2 np = ivec2(x, y) + fourNeighbors[k];
+                    if (np.x < 0 || np.x >= width || np.y < 0 || np.y >= height) continue;
+                    Ink nInk = image[np.x + np.y * width].getInk();
+                    int nGid = indexImage[np.x + np.y * width];
+                    if (nGid < 0 || nGid == curGid) continue;
+                    if (nInk != Ink::BundleOff) continue;
+                    if (conSet.insert(((long long)curGid << 32) | nGid).second)
+                        conList.push_back({ curGid, nGid });
+                }
+            }
+        }
+
+        // Update inDeg
+        std::fill(inDeg.begin(), inDeg.end(), 0);
+        for (auto& e : conList) inDeg[e.second]++;
+
+        // Pass B: BundleOff -> gate reads, if no cycle
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 Ink curInk = image[x + y * width].getInk();
@@ -572,7 +597,13 @@ namespace openVCB {
                     int nGid = indexImage[np.x + np.y * width];
                     if (nGid < 0 || nGid == curGid) continue;
                     if (!isLogicGate2(nInk)) continue;
-                    if (isReachable(nGid, curGid)) continue; // avoid cycle
+                    // ensure gate doesn't already write to this bundle
+                    bool alreadyWrites = false;
+                    for (auto& e : conList) {
+                        if (e.first == nGid && e.second == curGid) { alreadyWrites = true; break; }
+                    }
+                    if (alreadyWrites) continue;
+                    if (isReachable(nGid, curGid)) continue;
                     if (conSet.insert(((long long)curGid << 32) | nGid).second)
                         conList.push_back({ curGid, nGid });
                 }
