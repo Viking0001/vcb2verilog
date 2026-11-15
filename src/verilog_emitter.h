@@ -19,7 +19,7 @@ public:
     explicit VerilogEmitter(openVCB::Project& proj);
 
     /// If true, traces with in-degree 0 that drive internal gates are exposed as input ports
-    bool exposeZeroInDegreeTraces = true;
+    bool exposeZeroInDegreeTraces = false;
     /// Custom clock period (number of ticks per pulse)
     unsigned long long clockPeriod = 2;
 

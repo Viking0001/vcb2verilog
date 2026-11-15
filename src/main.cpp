@@ -61,7 +61,7 @@ int main(int argc, char** argv) {
     std::string outputFile;
     std::string moduleName;
     unsigned long long clockPeriod = 2;
-    bool exposeInputs = true;
+    bool exposeInputs = false;
     bool verbose = false;
     bool optimize = true;
     std::string optLevel = "opt";
