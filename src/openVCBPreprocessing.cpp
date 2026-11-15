@@ -447,27 +447,6 @@ namespace openVCB {
                    in == Ink::XnorOff || in == Ink::BufferOff;
         };
 
-        // 1. One-way gate -> Bundle edges
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                Ink curInk = image[x + y * width].getInk();
-                int curGid = indexImage[x + y * width];
-                if (curGid < 0) continue;
-                if (!isLogicGate(curInk)) continue;
-                for (int k = 0; k < 4; k++) {
-                    ivec2 np = ivec2(x, y) + fourNeighbors[k];
-                    if (np.x < 0 || np.x >= width || np.y < 0 || np.y >= height) continue;
-                    Ink nInk = image[np.x + np.y * width].getInk();
-                    int nGid = indexImage[np.x + np.y * width];
-                    if (nGid < 0 || nGid == curGid) continue;
-                    if (nInk == Ink::BundleOff) {
-                        if (conSet.insert(((long long)curGid << 32) | nGid).second)
-                            conList.push_back({ curGid, nGid });
-                    }
-                }
-            }
-        }
-
         // 2. BFS depth for gate ordering
         std::vector<int> gateDepth(writeMap.n, -1);
         // sources: non-gate groups
@@ -543,6 +522,59 @@ namespace openVCB {
                         if (conSet.insert(((long long)curGid << 32) | nGid).second)
                             conList.push_back({ curGid, nGid });
                     }
+                }
+            }
+        }
+
+        // isReachable helper
+        auto isReachable = [&](int startGid, int targetGid) -> bool {
+            if (startGid == targetGid) return true;
+            std::vector<char> vis(writeMap.n, 0);
+            std::vector<int> q;
+            q.push_back(startGid);
+            vis[startGid] = 1;
+            size_t qi = 0;
+            while (qi < q.size()) {
+                int u = q[qi++];
+                for (auto& e : conList) {
+                    if (e.first != u) continue;
+                    int v = e.second;
+                    if (v == targetGid) return true;
+                    if (!vis[v]) { vis[v]=1; q.push_back(v); }
+                }
+            }
+            return false;
+        };
+
+        // inDeg
+        std::vector<int> inDeg(writeMap.n, 0);
+        for (auto& e : conList) inDeg[e.second]++;
+
+        auto isLogicGate2 = [](Ink in) {
+            in = setOff(in);
+            return in == Ink::AndOff || in == Ink::OrOff || in == Ink::XorOff ||
+                   in == Ink::NotOff || in == Ink::NandOff || in == Ink::NorOff ||
+                   in == Ink::XnorOff || in == Ink::BufferOff;
+        };
+
+        // Safe one-way BundleOff -> gate edges
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                Ink curInk = image[x + y * width].getInk();
+                int curGid = indexImage[x + y * width];
+                if (curGid < 0) continue;
+                if (curInk != Ink::BundleOff) continue;
+                if (inDeg[curGid] == 0) continue;
+                for (int k = 0; k < 4; k++) {
+                    ivec2 np = ivec2(x, y) + fourNeighbors[k];
+                    if (np.x < 0 || np.x >= width || np.y < 0 || np.y >= height) continue;
+                    Ink nInk = image[np.x + np.y * width].getInk();
+                    int nGid = indexImage[np.x + np.y * width];
+                    if (nGid < 0 || nGid == curGid) continue;
+                    if (!isLogicGate2(nInk)) continue;
+                    if (isReachable(nGid, curGid)) continue; // avoid cycle
+                    if (conSet.insert(((long long)curGid << 32) | nGid).second)
+                        conList.push_back({ curGid, nGid });
                 }
             }
         }
