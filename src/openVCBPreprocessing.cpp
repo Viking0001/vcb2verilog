@@ -526,6 +526,40 @@ namespace openVCB {
             }
         }
 
+        // Pass A: powered gates write into BundleOff
+        auto isLogicGate3 = [](Ink in) {
+            in = setOff(in);
+            return in == Ink::AndOff || in == Ink::OrOff || in == Ink::XorOff ||
+                   in == Ink::NotOff || in == Ink::NandOff || in == Ink::NorOff ||
+                   in == Ink::XnorOff || in == Ink::BufferOff;
+        };
+        std::vector<int> inDegA(writeMap.n, 0);
+        for (auto& e : conList) inDegA[e.second]++;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                Ink curInk = image[x + y * width].getInk();
+                int curGid = indexImage[x + y * width];
+                if (curGid < 0) continue;
+                if (!isLogicGate3(curInk)) continue;
+                if (inDegA[curGid] == 0) continue;
+                for (int k = 0; k < 4; k++) {
+                    ivec2 np = ivec2(x, y) + fourNeighbors[k];
+                    if (np.x < 0 || np.x >= width || np.y < 0 || np.y >= height) continue;
+                    Ink nInk = image[np.x + np.y * width].getInk();
+                    int nGid = indexImage[np.x + np.y * width];
+                    if (nGid < 0 || nGid == curGid) continue;
+                    if (nInk != Ink::BundleOff) continue;
+                    if (inDegA[nGid] != 0) continue;
+                    if (conSet.insert(((long long)curGid << 32) | nGid).second)
+                        conList.push_back({ curGid, nGid });
+                }
+            }
+        }
+
+        // Update inDeg
+        std::vector<int> inDeg(writeMap.n, 0);
+        for (auto& e : conList) inDeg[e.second]++;
+
         // isReachable helper
         auto isReachable = [&](int startGid, int targetGid) -> bool {
             if (startGid == targetGid) return true;
@@ -546,34 +580,7 @@ namespace openVCB {
             return false;
         };
 
-        // inDeg
-        std::vector<int> inDeg(writeMap.n, 0);
-        for (auto& e : conList) inDeg[e.second]++;
-
-        auto isLogicGate2 = [](Ink in) {
-            in = setOff(in);
-            return in == Ink::AndOff || in == Ink::OrOff || in == Ink::XorOff ||
-                   in == Ink::NotOff || in == Ink::NandOff || in == Ink::NorOff ||
-                   in == Ink::XnorOff || in == Ink::BufferOff;
-        };
-
-        // origInDeg before Pass A
-        std::vector<int> origInDeg(writeMap.n, 0);
-        for (auto& e : conList) origInDeg[e.second]++;
-
-        // Add W->bundle edges from bundleWriteSources
-        for (int b = 0; b < writeMap.n; b++) {
-            for (int src : bundleWriteSources[b]) {
-                if (conSet.insert(((long long)src << 32) | b).second)
-                    conList.push_back({ src, b });
-            }
-        }
-
-        // Update inDeg
-        std::fill(inDeg.begin(), inDeg.end(), 0);
-        for (auto& e : conList) inDeg[e.second]++;
-
-        // Pass B: BundleOff -> gate reads, if no cycle
+        // Pass B: BundleOff -> gate reads
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 Ink curInk = image[x + y * width].getInk();
@@ -587,7 +594,12 @@ namespace openVCB {
                     Ink nInk = image[np.x + np.y * width].getInk();
                     int nGid = indexImage[np.x + np.y * width];
                     if (nGid < 0 || nGid == curGid) continue;
-                    if (!isLogicGate2(nInk)) continue;
+                    if (!isLogicGate3(nInk)) continue;
+                    bool alreadyWrites = false;
+                    for (auto& e : conList) {
+                        if (e.first == nGid && e.second == curGid) { alreadyWrites = true; break; }
+                    }
+                    if (alreadyWrites) continue;
                     if (inDeg[nGid] >= 2) continue;
                     if (isReachable(nGid, curGid)) continue;
                     if (conSet.insert(((long long)curGid << 32) | nGid).second)
