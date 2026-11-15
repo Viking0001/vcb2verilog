@@ -522,6 +522,7 @@ namespace openVCB {
             }
         }
 
+// NEWBLOCK
         // Stores rows per column
         std::vector<int> accu(writeMap.n, 0);
         for (auto e : conList)
