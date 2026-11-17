@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "verilog_emitter.h"
+#include "openVCB.h"
 
 #include <iostream>
 #include <sstream>
@@ -176,6 +177,7 @@ void VerilogEmitter::analyzeGroups() {
 
     for (int gid = 0; gid < proj.numGroups; gid++) {
         Ink ink = setOff(proj.stateInks[gid]);
+        if (openVCB::g_debug) fprintf(stderr, "[GROUP] gid=%d ink=%d\n", gid, (int)ink);
         switch (ink) {
         case Ink::ReadOff:
             if (exposeZeroInDegreeTraces &&
@@ -224,7 +226,6 @@ void VerilogEmitter::analyzeGroups() {
                 latchGroups.insert(gid);
             }
             if (reverseAdj[gid].empty() && !(hasVmem && std::find(vmemDataGids.begin(), vmemDataGids.end(), gid) != vmemDataGids.end())) {
-                // Only expose as switch if it actually drives something in the circuit
                 if (outDegree[gid] > 0) {
                     latchBtnInputs.insert(gid);
                     latchGroups.erase(gid);
@@ -232,6 +233,11 @@ void VerilogEmitter::analyzeGroups() {
                     ignoredGroups.insert(gid);
                     latchGroups.erase(gid);
                 }
+            }
+            if (openVCB::g_debug) {
+                fprintf(stderr, "[LATCH] gid=%d selfLoop=%d extInputs=%zu reverseAdj=%zu outDeg=%d isSelfLoopSet=%d\n",
+                    gid, (int)isSelfLoop, extInputs.size(), reverseAdj[gid].size(), outDegree[gid], (int)selfLoopLatches.count(gid));
+                for (int src: reverseAdj[gid]) fprintf(stderr, "   src=%d\n", src);
             }
             break;
         }
@@ -262,6 +268,8 @@ void VerilogEmitter::analyzeGroups() {
     }
 
     detectCombinationalLoops();
+    loopBreakGroups.clear();
+    if (openVCB::g_debug) { fprintf(stderr, "[LOOPS] count=%zu\n", loopBreakGroups.size()); }
 }
 
 

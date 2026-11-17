@@ -107,6 +107,8 @@ int main(int argc, char** argv) {
                 std::cerr << "Error: Unknown clock mode: \"" << clockMode << "\". Use 'auto', 'on', or 'off'.\n";
                 return 1;
             }
+        } else if (arg == "--debug") {
+            openVCB::g_debug = true;
         } else if (arg == "-v" || arg == "--verbose") {
             verbose = true;
         } else if (arg == "-e" || arg == "--expose-inputs") {

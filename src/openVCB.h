@@ -13,6 +13,7 @@
 #include <map>
 
 namespace openVCB {
+    extern bool g_debug;
 	struct LatchInterface {
 		glm::ivec2 pos;
 		glm::ivec2 stride;
@@ -77,6 +78,7 @@ namespace openVCB {
 		numTypes,
 		Tunnel = 100,
 		Mesh = 101,
+		Bus = 102,
 
 		Trace = 129,
 		Read,

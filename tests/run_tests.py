@@ -262,6 +262,18 @@ def compile_vcb(vcb_path: str, out_v: str) -> None:
         raise RuntimeError(f"vcb2verilog selhal:\n{res.stdout}\n{res.stderr}")
 
 
+def compile_vcb_raw(vcb_path: str, out_v: str) -> None:
+    res = subprocess.run([BIN, "--no-opt", vcb_path, "-o", out_v], capture_output=True, text=True)
+    if res.returncode != 0:
+        raise RuntimeError(f"vcb2verilog selhal:\n{res.stdout}\n{res.stderr}")
+
+
+def count_gate_assignments(verilog_path: str, gate: str) -> int:
+    with open(verilog_path, "r", encoding="utf-8") as f:
+        code = f.read()
+    return len(re.findall(rf"^\s*assign\s+g_\d+\s*=.*// {re.escape(gate)} \[\d+\]$", code, re.MULTILINE))
+
+
 def main() -> int:
     if not os.path.exists(BIN):
         print(f"[FAIL] Binárka nenalezena: {BIN}")
@@ -374,26 +386,28 @@ def main() -> int:
     tests.append(("5_bus_channel_isolation", test_bus_channel_isolation))
 
     def test_3x22_half_adder():
+        # This board routes bundled signals. Use ordinary Bundle ink; BUS is
+        # reserved for merging logical component identities.
         grid = [
             ["LED",   ".",    "LED"],
             ["R",     ".",    "R"],
             ["W",     ".",    "W"],
-            ["BUS2",  "R",    "XOR"],
-            ["BUS2",  ".",    "."],
-            ["BUS2",  ".",    "AND"],
-            ["BUS2",  ".",    "R"],
-            ["BUS2",  "R",    "."],
-            ["BUS2",  "AND",  "R"],
-            ["BUS2",  "AND",  "Buffer"],
-            ["BUS2",  "W",    "AND"],
-            ["BUS2",  "BUS2", "R"],
-            ["BUS2",  "W",    "AND"],
-            ["BUS2",  "BUS2", "."],
-            ["BUS2",  "W",    "AND"],
-            ["BUS2",  "BUS2", "R"],
-            ["BUS2",  ".",    "W"],
-            ["W",     "BUS2", "XOR"],
-            ["AND",   "BUS2", "AND"],
+            ["BUS",   "R",    "XOR"],
+            ["BUS",   ".",    "."],
+            ["BUS",   ".",    "AND"],
+            ["BUS",   ".",    "R"],
+            ["BUS",   "R",    "."],
+            ["BUS",   "AND",  "R"],
+            ["BUS",   "AND",  "Buffer"],
+            ["BUS",   "W",    "AND"],
+            ["BUS",   "BUS",  "R"],
+            ["BUS",   "W",    "AND"],
+            ["BUS",   "BUS",  "."],
+            ["BUS",   "W",    "AND"],
+            ["BUS",   "BUS",  "R"],
+            ["BUS",   ".",    "W"],
+            ["W",     "BUS",  "XOR"],
+            ["AND",   "BUS",  "AND"],
             ["R",     "XOR",  "R"],
             ["W",     ".",    "W"],
             ["Latch", ".",    "Latch"],
@@ -413,7 +427,103 @@ def main() -> int:
         ]
         simulate_comb(out_v, "test2_3x22", table)
 
-    tests.append(("6_3x22_bus2_xor_or_regression", test_3x22_half_adder))
+    tests.append(("6_3x22_bundle_half_adder_regression", test_3x22_half_adder))
+
+    def test_bus_merges_two_and_gates():
+        grid = [
+            ["Latch", "W", "Trace",  "R", "AND", "BUS2"],
+            [".",     ".", ".",      ".", ".",   "BUS2"],
+            ["Latch", "W", "Trace1", "R", "AND", "BUS2"],
+            [".",     ".", ".",      ".", "W",   "BUS2"],
+            [".",     ".", ".",      ".", "Trace","."],
+            [".",     ".", ".",      ".", "R",   "."],
+            [".",     ".", ".",      ".", "LED", "."],
+        ]
+        vcb = os.path.join(TMP_DIR, "bus_merge_two_and.vcb")
+        out_v = os.path.join(TMP_DIR, "bus_merge_two_and.v")
+        build_vcb(grid, vcb)
+        compile_vcb_raw(vcb, out_v)
+        assert count_gate_assignments(out_v, "AND") == 1, "AND-BUS-AND musí být jedna logická AND gate"
+        _, inputs, _, code = parse_ports(out_v)
+        assert len(inputs) == 2, f"Neočekávané vstupy po sloučení: {inputs}"
+        assert "BUNDLE [" not in code, "BUS oblast nesmí být samostatný BUNDLE uzel"
+        table = [((0, 0), (0,)), ((0, 1), (0,)), ((1, 0), (0,)), ((1, 1), (1,))]
+        simulate_comb(out_v, "bus_merge_two_and", table)
+
+    tests.append(("9_bus_merges_and_bus_is_not_a_node", test_bus_merges_two_and_gates))
+
+    def test_bus_merges_multiple_and_gates():
+        grid = [
+            ["Latch", "W", "Trace",  "R", "AND", "BUS2"],
+            [".",     ".", ".",      ".", ".",   "BUS2"],
+            ["Latch", "W", "Trace1", "R", "AND", "BUS2"],
+            [".",     ".", ".",      ".", ".",   "BUS2"],
+            ["Latch", "W", "Trace2", "R", "AND", "BUS2"],
+            [".",     ".", ".",      ".", "W",   "BUS2"],
+            [".",     ".", ".",      ".", "Trace3", "."],
+            [".",     ".", ".",      ".", "R",   "."],
+            [".",     ".", ".",      ".", "LED", "."],
+        ]
+        vcb = os.path.join(TMP_DIR, "bus_merge_multiple_and.vcb")
+        out_v = os.path.join(TMP_DIR, "bus_merge_multiple_and.v")
+        build_vcb(grid, vcb)
+        compile_vcb_raw(vcb, out_v)
+        assert count_gate_assignments(out_v, "AND") == 1, "Sdílená BUS oblast musí sloučit všechny tři AND gate"
+        table = [
+            ((0, 0, 0), (0,)), ((0, 0, 1), (0,)),
+            ((0, 1, 0), (0,)), ((0, 1, 1), (0,)),
+            ((1, 0, 0), (0,)), ((1, 0, 1), (0,)),
+            ((1, 1, 0), (0,)), ((1, 1, 1), (1,)),
+        ]
+        simulate_comb(out_v, "bus_merge_multiple_and", table)
+
+    tests.append(("10_bus_merges_all_same_type_components", test_bus_merges_multiple_and_gates))
+
+    def test_bus_merge_is_independent_of_pixel_order():
+        # BUS pixels scan before the gates in this horizontally mirrored board.
+        grid = [
+            ["BUS2", "AND", "R", "Trace",  "W", "Latch"],
+            ["BUS2", ".",   ".", ".",      ".", "."],
+            ["BUS2", "AND", "R", "Trace1", "W", "Latch"],
+            ["BUS2", "W",   ".", ".",      ".", "."],
+            [".",    "Trace",".", ".",      ".", "."],
+            [".",    "R",   ".", ".",      ".", "."],
+            [".",    "LED", ".", ".",      ".", "."],
+        ]
+        vcb = os.path.join(TMP_DIR, "bus_merge_scan_order.vcb")
+        out_v = os.path.join(TMP_DIR, "bus_merge_scan_order.v")
+        build_vcb(grid, vcb)
+        compile_vcb_raw(vcb, out_v)
+        assert count_gate_assignments(out_v, "AND") == 1, "BUS slučování závisí na pořadí skenu pixelů"
+        table = [((0, 0), (0,)), ((0, 1), (0,)), ((1, 0), (0,)), ((1, 1), (1,))]
+        simulate_comb(out_v, "bus_merge_scan_order", table)
+
+    tests.append(("11_bus_merge_independent_of_pixel_order", test_bus_merge_is_independent_of_pixel_order))
+
+    def test_bus_does_not_merge_different_gate_types():
+        grid = [
+            ["Latch", "W", "Trace",  "R", "AND", "BUS2"],
+            [".",     ".", ".",      ".", "W",   "BUS2"],
+            [".",     ".", ".",      ".", "Trace1","BUS2"],
+            [".",     ".", ".",      ".", "R",   "BUS2"],
+            [".",     ".", ".",      ".", "LED", "BUS2"],
+            [".",     ".", ".",      ".", ".",   "BUS2"],
+            ["Latch", "W", "Trace2", "R", "OR",  "BUS2"],
+            [".",     ".", ".",      ".", "W",   "BUS2"],
+            [".",     ".", ".",      ".", "Trace3","BUS2"],
+            [".",     ".", ".",      ".", "R",   "BUS2"],
+            [".",     ".", ".",      ".", "LED", "."],
+        ]
+        vcb = os.path.join(TMP_DIR, "bus_different_gate_types.vcb")
+        out_v = os.path.join(TMP_DIR, "bus_different_gate_types.v")
+        build_vcb(grid, vcb)
+        compile_vcb_raw(vcb, out_v)
+        assert count_gate_assignments(out_v, "AND") == 1, "AND se nesmí změnit na jiný typ"
+        assert count_gate_assignments(out_v, "OR") == 1, "OR se nesmí sloučit s AND"
+        _, _, outputs, _ = parse_ports(out_v)
+        assert len(outputs) == 2, f"Výstupy různých gate komponent se ztratily: {outputs}"
+
+    tests.append(("12_bus_preserves_different_gate_types", test_bus_does_not_merge_different_gate_types))
 
     def test_buffer_dff():
         grid = [

@@ -1,3 +1,4 @@
+namespace openVCB { bool g_debug = false; }
 // openVCB - Virtual Circuit Board utility methods
 // SPDX-License-Identifier: GPL-3.0-or-later
 

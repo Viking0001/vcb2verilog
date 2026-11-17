@@ -183,15 +183,20 @@ namespace openVCB {
             pix.ink = (int16_t)Ink::Mesh;
             break;
 
-        // Bus components are treated as wire bundles (connectivity)
+        // Keep BUS distinct from ordinary Bundle ink. BUS merges logical
+        // components during preprocessing and is not a signal wire.
         case 0x7a2f24: // BUS_0 (122,47,36)
+            pix.ink = (int16_t)Ink::Bus; pix.meta = 0; break;
         case 0x3e7a24: // BUS_1 (62,122,36)
+            pix.ink = (int16_t)Ink::Bus; pix.meta = 1; break;
         case 0x24417a: // BUS_2 (36,65,122)
+            pix.ink = (int16_t)Ink::Bus; pix.meta = 2; break;
         case 0x25627a: // BUS_3 (37,98,122)
+            pix.ink = (int16_t)Ink::Bus; pix.meta = 3; break;
         case 0x7a2d66: // BUS_4 (122,45,102)
+            pix.ink = (int16_t)Ink::Bus; pix.meta = 4; break;
         case 0x7a7024: // BUS_5 (122,112,36)
-            pix.ink = (int16_t)Ink::BundleOff;
-            break;
+            pix.ink = (int16_t)Ink::Bus; pix.meta = 5; break;
 
         default:
             for (int i = 0; i < 2 * (int)Ink::numTypes; i++)
@@ -241,18 +246,22 @@ namespace openVCB {
             return 0;
         }
         else if (imSize == ZSTD_CONTENTSIZE_UNKNOWN) {
-            fprintf(stderr, "Error: Original size unknown!\n");
-            return 0;
+            imSize = imgDSize;
         }
         else if (imSize != imgDSize) {
             fprintf(stderr, "Error: Decompressed image data size does not match header\n");
             return 0;
         }
-        else {
-            originalImage = new unsigned char[imSize];
-            size_t const dSize = ZSTD_decompress(originalImage, imSize, cc, ccSize);
-            return 1;
+
+        originalImage = new unsigned char[imSize];
+        size_t const dSize = ZSTD_decompress(originalImage, imSize, cc, ccSize);
+        if (ZSTD_isError(dSize) || dSize != imSize) {
+            fprintf(stderr, "Error: Decompressed size does not match expected size\n");
+            delete[] originalImage;
+            originalImage = nullptr;
+            return 0;
         }
+        return 1;
     }
 
     bool Project::processLogicData(std::vector<unsigned char> logicData, int headerSize) {

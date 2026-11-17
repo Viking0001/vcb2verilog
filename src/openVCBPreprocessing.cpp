@@ -2,6 +2,7 @@
 
 #include "openVCB.h"
 #include <cstdio>
+#include <cstdint>
 #include <unordered_set>
 #include <algorithm>
 #include <unordered_map>
@@ -122,7 +123,7 @@ namespace openVCB {
                 if (newInk == Ink::Tunnel) {
                     jumpTunnel(np, fourNeighbors[k]);
                 }
-                else if (newInk == Ink::BundleOff || newInk == Ink::Mesh) {
+                else if (newInk == Ink::BundleOff || newInk == Ink::Bus || newInk == Ink::Mesh) {
                     visited[nidx] |= mask;
                     bundleStack.push_back(np);
                     if (newInk == Ink::Mesh) {
@@ -144,7 +145,7 @@ namespace openVCB {
 #pragma omp parallel for schedule(static, 8192)
         for (int i = 0; i < width * height; i++) {
             Ink ink = (Ink)image[i].ink;
-            if (ink == Ink::Tunnel || ink == Ink::Mesh) {
+            if (ink == Ink::Tunnel) {
 			image[i].ink = (int16_t)Ink::BundleOff;
 		} else {
 			image[i].ink = (int16_t)setOff(ink);
@@ -172,9 +173,6 @@ namespace openVCB {
         using Group = tuple<int, Logic, Ink>;
         vector<Group> indexDict;
 
-        unordered_multimap<int, int> bundleCons;
-        unordered_set<long long> bundleConsSet;
-
         std::vector<int> busVisited(width * height, 0);
         int busGen = 0;
 
@@ -183,7 +181,7 @@ namespace openVCB {
             for (int x = 0; x < width; x++)
                 if (!(visited[x + y * width] & 1)) {
                     Ink ink = image[x + y * width].getInk();
-                    if (ink == Ink::Cross || ink == Ink::None ||
+                    if (ink == Ink::Cross || ink == Ink::None || ink == Ink::Bus || ink == Ink::Mesh ||
                         ink == Ink::Annotation || ink == Ink::Filler)
                         continue;
                     else if (ink == Ink::ReadOff) {
@@ -219,7 +217,8 @@ namespace openVCB {
 
                             // Handle wire bundles, mesh, and tunnels
                             Ink newInk = image[nidx].getInk();
-                            if (ink == Ink::TraceOff && (newInk == Ink::BundleOff || newInk == Ink::Mesh || newInk == Ink::Tunnel)) {
+                            if (ink == Ink::TraceOff && (newInk == Ink::BundleOff || newInk == Ink::Bus ||
+                                                         newInk == Ink::Mesh || newInk == Ink::Tunnel)) {
                                 InkPixel npix = image[idx];
                                 int mask;
 
@@ -233,24 +232,11 @@ namespace openVCB {
                                 if (nvis & mask) continue;
 
                                 exploreBundle(np, fourNeighbors[k], mask, image, width, height, visited, stack, bundleStack, readInks, writeInks, meshPixels);
-
-                                if (nvis & 1) {
-                                    int otherIdx = indexImage[nidx];
-                                    if (bundleConsSet.insert(((long long)otherIdx << 32) | gid).second)
-                                        bundleCons.insert({ gid, otherIdx });
-                                }
-
                                 continue;
                             }
 
                             // Check if already visited
                             if (nvis & 1) {
-                                if ((ink == Ink::BundleOff || ink == Ink::Mesh || ink == Ink::Tunnel) &&
-                                    (newInk == Ink::TraceOff || newInk == Ink::ReadOff || newInk == Ink::WriteOff)) {
-                                    int otherIdx = indexImage[nidx];
-                                    if (bundleConsSet.insert(((long long)gid << 32) | otherIdx).second)
-                                        bundleCons.insert({ otherIdx, gid });
-                                }
                                 continue;
                             }
 
@@ -288,8 +274,10 @@ namespace openVCB {
                             }
                             else if (ink != Ink::TraceOff && ink != Ink::BundleOff &&
                                      ink != Ink::Mesh && ink != Ink::Tunnel &&
-                                     (newInk == Ink::BundleOff || newInk == Ink::Mesh || newInk == Ink::Tunnel)) {
-                                // Merge same-type components connected via BUS / Mesh / Tunnel
+                                     (newInk == Ink::BundleOff || newInk == Ink::Tunnel)) {
+                                // Preserve the existing Bundle/Tunnel merge
+                                // behavior. BUS and Mesh identities are resolved
+                                // deterministically after physical groups exist.
                                 ++busGen;
                                 if (busVisited[nidx] != busGen) {
                                     std::vector<ivec2> gBusStack = { np };
@@ -311,7 +299,7 @@ namespace openVCB {
                                                 visited[bnidx] |= 1;
                                                 stack.push_back(bnp);
                                             }
-                                            else if ((bInk == Ink::BundleOff || bInk == Ink::Mesh || bInk == Ink::Tunnel) &&
+                                            else if ((bInk == Ink::BundleOff || bInk == Ink::Tunnel) &&
                                                      busVisited[bnidx] != busGen) {
                                                 busVisited[bnidx] = busGen;
                                                 gBusStack.push_back(bnp);
@@ -326,6 +314,143 @@ namespace openVCB {
                     // Add on the new group
                     indexDict.push_back({ gid, inkLogicType(setOff(ink)), setOff(ink) });
                 }
+
+        // A BUS is a physical merge region, not a signal-graph node. First
+        // discover each connected BUS region, then union the compatible
+        // physical component groups touching that region. This pass runs
+        // after all physical groups have been identified, so row-major scan
+        // order cannot decide which group owns a BUS pixel.
+        const int physicalGroupCount = writeMap.n;
+        std::vector<int> parent(physicalGroupCount);
+        std::vector<int> rank(physicalGroupCount, 0);
+        for (int i = 0; i < physicalGroupCount; ++i) parent[i] = i;
+
+        auto findRoot = [&](int value) {
+            int root = value;
+            while (parent[root] != root) root = parent[root];
+            while (parent[value] != value) {
+                int next = parent[value];
+                parent[value] = root;
+                value = next;
+            }
+            return root;
+        };
+        auto uniteGroups = [&](int first, int second) {
+            int a = findRoot(first);
+            int b = findRoot(second);
+            if (a == b) return;
+            if (rank[a] < rank[b]) std::swap(a, b);
+            parent[b] = a;
+            if (rank[a] == rank[b]) ++rank[a];
+        };
+        auto busMergeType = [](Ink ink) {
+            ink = setOff(ink);
+            return ink != Ink::TraceOff && ink != Ink::BundleOff &&
+                   ink != Ink::Bus && ink != Ink::Mesh && ink != Ink::Cross && ink != Ink::None &&
+                   ink != Ink::Filler && ink != Ink::Annotation;
+        };
+
+        std::vector<unsigned char> busRegionVisited(width * height, 0);
+        std::vector<ivec2> physicalBusStack;
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                int startIdx = x + y * width;
+                if (image[startIdx].getInk() != Ink::Bus || busRegionVisited[startIdx]) continue;
+
+                std::unordered_map<int, int> firstGroupByType;
+                physicalBusStack.push_back(ivec2(x, y));
+                busRegionVisited[startIdx] = 1;
+                while (!physicalBusStack.empty()) {
+                    ivec2 p = physicalBusStack.back();
+                    physicalBusStack.pop_back();
+
+                    for (int k = 0; k < 4; ++k) {
+                        ivec2 np = p + fourNeighbors[k];
+                        if (np.x < 0 || np.x >= width || np.y < 0 || np.y >= height) continue;
+                        int nidx = np.x + np.y * width;
+
+                        // Cross keeps its existing straight-through behavior:
+                        // a BUS can continue across it on the same axis, but
+                        // the crossing itself does not connect the axes.
+                        if (image[nidx].getInk() == Ink::Cross) {
+                            np += fourNeighbors[k];
+                            if (np.x < 0 || np.x >= width || np.y < 0 || np.y >= height) continue;
+                            nidx = np.x + np.y * width;
+                            if (image[nidx].getInk() != Ink::Bus) continue;
+                        }
+
+                        if (image[nidx].getInk() == Ink::Bus) {
+                            if (!busRegionVisited[nidx]) {
+                                busRegionVisited[nidx] = 1;
+                                physicalBusStack.push_back(np);
+                            }
+                            continue;
+                        }
+
+                        int group = indexImage[nidx];
+                        if (group < 0 || group >= physicalGroupCount) continue;
+                        Ink componentType = std::get<2>(indexDict[group]);
+                        if (!busMergeType(componentType)) continue;
+
+                        int typeKey = static_cast<int>(setOff(componentType));
+                        auto inserted = firstGroupByType.emplace(typeKey, group);
+                        if (!inserted.second) uniteGroups(inserted.first->second, group);
+                    }
+                }
+            }
+        }
+
+        // All Mesh pixels belong to one global merge resource, even when
+        // physically separated. Union every compatible component touching
+        // any Mesh pixel into the same per-ink disjoint sets.
+        std::unordered_map<int, int> firstMeshGroupByType;
+        for (const ivec2& meshPos : meshPixels) {
+            for (int k = 0; k < 4; ++k) {
+                ivec2 np = meshPos + fourNeighbors[k];
+                if (np.x < 0 || np.x >= width || np.y < 0 || np.y >= height) continue;
+                int nidx = np.x + np.y * width;
+
+                // A Cross continues only along the axis on which this Mesh
+                // reaches it; it does not connect the perpendicular axis.
+                if (image[nidx].getInk() == Ink::Cross) {
+                    np += fourNeighbors[k];
+                    if (np.x < 0 || np.x >= width || np.y < 0 || np.y >= height) continue;
+                    nidx = np.x + np.y * width;
+                }
+
+                int group = indexImage[nidx];
+                if (group < 0 || group >= physicalGroupCount) continue;
+                Ink componentType = std::get<2>(indexDict[group]);
+                if (!busMergeType(componentType)) continue;
+
+                int typeKey = static_cast<int>(setOff(componentType));
+                auto inserted = firstMeshGroupByType.emplace(typeKey, group);
+                if (!inserted.second) uniteGroups(inserted.first->second, group);
+            }
+        }
+
+        // Compact the disjoint sets and project every physical component
+        // pixel onto its final logical group before sorting and graph creation.
+        std::vector<int> rootToFinal(physicalGroupCount, -1);
+        std::vector<int> oldToFinal(physicalGroupCount, -1);
+        std::vector<Group> mergedIndexDict;
+        mergedIndexDict.reserve(physicalGroupCount);
+        for (int oldGroup = 0; oldGroup < physicalGroupCount; ++oldGroup) {
+            int root = findRoot(oldGroup);
+            if (rootToFinal[root] < 0) {
+                int finalGroup = static_cast<int>(mergedIndexDict.size());
+                rootToFinal[root] = finalGroup;
+                mergedIndexDict.push_back({ finalGroup,
+                    std::get<1>(indexDict[root]), std::get<2>(indexDict[root]) });
+            }
+            oldToFinal[oldGroup] = rootToFinal[root];
+        }
+        for (int i = 0, lim = width * height; i < lim; ++i) {
+            int oldGroup = indexImage[i];
+            if (oldGroup >= 0) indexImage[i] = oldToFinal[oldGroup];
+        }
+        indexDict.swap(mergedIndexDict);
+        writeMap.n = static_cast<int>(indexDict.size());
         numGroups = writeMap.n;
 
         // Sort groups by ink vs. component then by morton code.
@@ -360,10 +485,16 @@ namespace openVCB {
                 indexImage[i] = writeMap.ptr[idx];
         }
 
-        // Hash sets to keep track of unique connections
-        unordered_set<long long> conSet;
+        // Keep only unique, directed signal edges after BUS groups have been
+        // merged. A BUS pixel has indexImage == -1 and never enters conList.
+        unordered_set<std::uint64_t> conSet;
         std::vector<std::pair<int, int>> conList;
-        std::vector<std::vector<int>> bundleWriteSources(writeMap.n);
+        auto addConnection = [&](int srcGID, int dstGID) {
+            if (srcGID < 0 || dstGID < 0 || srcGID == dstGID) return;
+            const std::uint64_t key = (static_cast<std::uint64_t>(static_cast<std::uint32_t>(srcGID)) << 32) |
+                                      static_cast<std::uint32_t>(dstGID);
+            if (conSet.insert(key).second) conList.push_back({ srcGID, dstGID });
+        };
 
         // Add connections from inks to components
         for (ivec2 p : readInks) {
@@ -376,23 +507,18 @@ namespace openVCB {
 
                 auto ink = image[np.x + np.y * width].ink;
                 if (ink == (int16_t)Ink::BundleOff || ink == (int16_t)Ink::Mesh ||
-                    ink == (int16_t)Ink::Tunnel || ink == (int16_t)Ink::ClockOff)
+                    ink == (int16_t)Ink::Tunnel || ink == (int16_t)Ink::Bus ||
+                    ink == (int16_t)Ink::ClockOff)
                     continue;
 
                 const int dstGID = indexImage[np.x + np.y * width];
-                if (srcGID != dstGID && dstGID != -1 && conSet.insert(((long long)srcGID << 32) | dstGID).second)
-                    conList.push_back({ srcGID, dstGID });
+                addConnection(srcGID, dstGID);
             }
         }
-
-        conSet.clear();
 
         // Add connections from components to inks
         for (ivec2 p : writeInks) {
             const int dstGID = indexImage[p.x + p.y * width];
-
-            int oldTraceIdx = std::get<0>(indexDict[dstGID]);
-            auto range = bundleCons.equal_range(oldTraceIdx);
 
             for (int k = 0; k < 4; k++) {
                 ivec2 np = p + fourNeighbors[k];
@@ -400,18 +526,12 @@ namespace openVCB {
                     np.y < 0 || np.y >= height) continue;
 
                 auto ink = image[np.x + np.y * width].ink;
-                if (ink == (int16_t)Ink::BundleOff || ink == (int16_t)Ink::Mesh || ink == (int16_t)Ink::Tunnel)
+                if (ink == (int16_t)Ink::BundleOff || ink == (int16_t)Ink::Mesh ||
+                    ink == (int16_t)Ink::Tunnel || ink == (int16_t)Ink::Bus)
                     continue;
 
                 const int srcGID = indexImage[np.x + np.y * width];
-                if (srcGID != dstGID && srcGID != -1 && conSet.insert(((long long)srcGID << 32) | dstGID).second) {
-                    conList.push_back({ srcGID, dstGID });
-
-                    for (auto itr = range.first; itr != range.second; itr++) {
-                        int bundleID = writeMap.ptr[itr->second];
-                        bundleWriteSources[bundleID].push_back(srcGID);
-                    }
-                }
+                addConnection(srcGID, dstGID);
             }
         }
 
@@ -428,10 +548,16 @@ namespace openVCB {
             g.GorderGreedy(order, 64);
 
             auto oldStates = states;
+            auto oldStateInks = stateInks;
             states = new InkState[writeMap.n];
-            for (int i = 0; i < writeMap.n; i++)
-                states[order[transformOrder[i]]] = oldStates[i];
+            stateInks = new Ink[writeMap.n];
+            for (int i = 0; i < writeMap.n; i++) {
+                int newGID = order[transformOrder[i]];
+                states[newGID] = oldStates[i];
+                stateInks[newGID] = oldStateInks[i];
+            }
             delete[] oldStates;
+            delete[] oldStateInks;
 
             for (size_t i = 0; i < conList.size(); i++) {
                 auto edge = conList[i];
@@ -446,8 +572,8 @@ namespace openVCB {
             }
         }
 
-        // isLogicGate helper
-        // Pass A: powered gates (inDeg >= 2) write into BundleOff (inDeg bundle == 0)
+        // Ordinary Bundle ink still carries bundled trace signals. Keep its
+        // legacy gate/bundle edge inference separate from BUS component merges.
         auto isLogicGate4 = [](Ink in) {
             in = setOff(in);
             return in == Ink::AndOff || in == Ink::OrOff || in == Ink::XorOff ||
@@ -455,76 +581,62 @@ namespace openVCB {
                    in == Ink::XnorOff || in == Ink::BufferOff;
         };
         std::vector<int> inDegA(writeMap.n, 0);
-        for (auto& e : conList) inDegA[e.second]++;
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                Ink curInk = image[x + y * width].getInk();
-                int curGid = indexImage[x + y * width];
-                if (curGid < 0) continue;
-                if (!isLogicGate4(curInk)) continue;
-                if (inDegA[curGid] < 2) continue;
-                for (int k = 0; k < 4; k++) {
+        for (const auto& edge : conList) ++inDegA[edge.second];
+
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                int curIdx = x + y * width;
+                Ink curInk = image[curIdx].getInk();
+                int curGID = indexImage[curIdx];
+                if (curGID < 0 || !isLogicGate4(curInk) || inDegA[curGID] < 2) continue;
+
+                for (int k = 0; k < 4; ++k) {
                     ivec2 np = ivec2(x, y) + fourNeighbors[k];
                     if (np.x < 0 || np.x >= width || np.y < 0 || np.y >= height) continue;
-                    Ink nInk = image[np.x + np.y * width].getInk();
-                    int nGid = indexImage[np.x + np.y * width];
-                    if (nGid < 0 || nGid == curGid) continue;
-                    if (nInk != Ink::BundleOff) continue;
-                    if (inDegA[nGid] != 0) continue;
-                    if (conSet.insert(((long long)curGid << 32) | nGid).second)
-                        conList.push_back({ curGid, nGid });
+                    int nIdx = np.x + np.y * width;
+                    int nGID = indexImage[nIdx];
+                    if (nGID < 0 || nGID == curGID || image[nIdx].getInk() != Ink::BundleOff) continue;
+                    if (inDegA[nGID] == 0) addConnection(curGID, nGID);
                 }
             }
         }
 
-        // Update inDeg
         std::vector<int> inDeg(writeMap.n, 0);
-        for (auto& e : conList) inDeg[e.second]++;
-
-        // isReachable helper
-        auto isReachable = [&](int startGid, int targetGid) -> bool {
-            if (startGid == targetGid) return true;
-            std::vector<char> vis(writeMap.n, 0);
-            std::vector<int> q;
-            q.push_back(startGid);
-            vis[startGid] = 1;
-            size_t qi = 0;
-            while (qi < q.size()) {
-                int u = q[qi++];
-                for (auto& e : conList) {
-                    if (e.first != u) continue;
-                    int v = e.second;
-                    if (v == targetGid) return true;
-                    if (!vis[v]) { vis[v]=1; q.push_back(v); }
+        for (const auto& edge : conList) ++inDeg[edge.second];
+        auto isReachable = [&](int startGID, int targetGID) {
+            if (startGID == targetGID) return true;
+            std::vector<unsigned char> seen(writeMap.n, 0);
+            std::vector<int> queue(1, startGID);
+            seen[startGID] = 1;
+            for (size_t head = 0; head < queue.size(); ++head) {
+                int u = queue[head];
+                for (const auto& edge : conList) {
+                    if (edge.first != u) continue;
+                    if (edge.second == targetGID) return true;
+                    if (!seen[edge.second]) {
+                        seen[edge.second] = 1;
+                        queue.push_back(edge.second);
+                    }
                 }
             }
             return false;
         };
 
-        // Pass B: BundleOff -> gate reads (gate inDeg < 2)
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                Ink curInk = image[x + y * width].getInk();
-                int curGid = indexImage[x + y * width];
-                if (curGid < 0) continue;
-                if (curInk != Ink::BundleOff) continue;
-                if (inDeg[curGid] == 0) continue;
-                for (int k = 0; k < 4; k++) {
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                int curIdx = x + y * width;
+                if (image[curIdx].getInk() != Ink::BundleOff) continue;
+                int curGID = indexImage[curIdx];
+                if (curGID < 0 || inDeg[curGID] == 0) continue;
+
+                for (int k = 0; k < 4; ++k) {
                     ivec2 np = ivec2(x, y) + fourNeighbors[k];
                     if (np.x < 0 || np.x >= width || np.y < 0 || np.y >= height) continue;
-                    Ink nInk = image[np.x + np.y * width].getInk();
-                    int nGid = indexImage[np.x + np.y * width];
-                    if (nGid < 0 || nGid == curGid) continue;
-                    if (!isLogicGate4(nInk)) continue;
-                    bool alreadyWrites = false;
-                    for (auto& e : conList) {
-                        if (e.first == nGid && e.second == curGid) { alreadyWrites = true; break; }
-                    }
-                    if (alreadyWrites) continue;
-                    if (inDeg[nGid] != 0) continue;
-                    if (isReachable(nGid, curGid)) continue;
-                    if (conSet.insert(((long long)curGid << 32) | nGid).second)
-                        conList.push_back({ curGid, nGid });
+                    int nIdx = np.x + np.y * width;
+                    int nGID = indexImage[nIdx];
+                    if (nGID < 0 || nGID == curGID || !isLogicGate4(image[nIdx].getInk())) continue;
+                    if (inDeg[nGID] != 0 || isReachable(nGID, curGID)) continue;
+                    addConnection(curGID, nGID);
                 }
             }
         }
@@ -577,6 +689,36 @@ namespace openVCB {
                 states[i].activeInputs = 1;
         }
 
+    if (openVCB::g_debug || std::getenv("VCB_DEBUG")) {
+        auto inkName=[](Ink in)->const char*{
+            in=setOff(in);
+            switch(in){
+            case Ink::TraceOff: return "TraceOff";
+            case Ink::BundleOff: return "BundleOff";
+            case Ink::AndOff: return "AndOff";
+            case Ink::OrOff: return "OrOff";
+            case Ink::XorOff: return "XorOff";
+            case Ink::NotOff: return "NotOff";
+            case Ink::NandOff: return "NandOff";
+            case Ink::NorOff: return "NorOff";
+            case Ink::XnorOff: return "XnorOff";
+            case Ink::BufferOff: return "BufferOff";
+            case Ink::LatchOff: return "LatchOff";
+            case Ink::LedOff: return "LedOff";
+            case Ink::ReadOff: return "ReadOff";
+            case Ink::WriteOff: return "WriteOff";
+            default: return "Other";
+            }
+        };
+        fprintf(stderr, "\n--- DEBUG CONLIST TRACE (%zu edges) ---\n", conList.size());
+        for (size_t i = 0; i < conList.size(); i++) {
+            int g1 = conList[i].first;
+            int g2 = conList[i].second;
+            fprintf(stderr, "Edge %zu: gid %d (%s) -> gid %d (%s)\n",
+                i, g1, inkName(stateInks[g1]), g2, inkName(stateInks[g2]));
+        }
+        fprintf(stderr, "----------------------------------------\n\n");
+    }
         fprintf(stderr, "[DEBUG] Celkem nalezeno skupin (writeMap.n): %d, Spojení (conList): %zu\n", writeMap.n, conList.size());
     }
 }
