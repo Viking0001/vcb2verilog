@@ -530,42 +530,6 @@ namespace openVCB {
         }
 
 // NEWBLOCK
-        // Prepare bus channel vectors
-        std::vector<std::vector<int>> busTraceCh(writeMap.n);
-        std::vector<std::vector<int>> busLogicCh(writeMap.n);
-
-        std::vector<int> inDegTmp(writeMap.n, 0);
-        for (auto& e : conList) inDegTmp[e.second]++;
-
-        auto isLogicGateTmp = [](Ink in) {
-            in = setOff(in);
-            return in == Ink::AndOff || in == Ink::OrOff || in == Ink::XorOff ||
-                   in == Ink::NotOff || in == Ink::NandOff || in == Ink::NorOff ||
-                   in == Ink::XnorOff || in == Ink::BufferOff;
-        };
-
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                Ink curInk = image[x + y * width].getInk();
-                int curGid = indexImage[x + y * width];
-                if (curGid < 0) continue;
-                if (curInk != Ink::BundleOff) continue;
-                for (int k = 0; k < 4; k++) {
-                    ivec2 np = ivec2(x, y) + fourNeighbors[k];
-                    if (np.x < 0 || np.x >= width || np.y < 0 || np.y >= height) continue;
-                    Ink nInk = image[np.x + np.y * width].getInk();
-                    int nGid = indexImage[np.x + np.y * width];
-                    if (nGid < 0 || nGid == curGid) continue;
-                    if (inDegTmp[nGid] == 0) continue;
-                    if (nInk == Ink::TraceOff) {
-                        busTraceCh[curGid].push_back(nGid);
-                    } else if (nInk == Ink::WriteOff || isLogicGateTmp(nInk)) {
-                        busLogicCh[curGid].push_back(nGid);
-                    }
-                }
-            }
-        }
-
         // Stores rows per column
         std::vector<int> accu(writeMap.n, 0);
         for (auto e : conList)
