@@ -895,6 +895,9 @@ namespace openVCB {
         }
         fprintf(stderr, "----------------------------------------\n\n");
     }
-        fprintf(stderr, "[DEBUG] Celkem nalezeno skupin (writeMap.n): %d, Spojení (conList): %zu\n", writeMap.n, conList.size());
+        if (openVCB::g_debug || std::getenv("VCB_DEBUG")) {
+            fprintf(stderr, "[DEBUG] Celkem nalezeno skupin (writeMap.n): %d, Spojení (conList): %zu\n",
+                writeMap.n, conList.size());
+        }
     }
 }

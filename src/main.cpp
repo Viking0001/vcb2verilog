@@ -25,35 +25,63 @@ void printBanner() {
               << "=====================================================\n";
 }
 
-void printHelp(const char* progName) {
-    std::cout << "Usage: " << progName << " [OPTIONS] <input.vcb> [-o <output.v>]\n"
-              << "       " << progName << " [OPTIONS] -i <input.vcb> [-o <output.v>]\n\n"
+void printHelp() {
+    std::cout << "vcb2verilog - Convert Virtual Circuit Board projects to Verilog HDL\n\n"
+              << "Usage:\n"
+              << "  vcb2verilog [OPTIONS] <input.vcb> [output.v]\n"
+              << "\n"
               << "Description:\n"
-              << "  Transpiles digital logic circuits from Virtual Circuit Board (.vcb)\n"
-              << "  into clean, synthesizable Verilog HDL (.v) for FPGA silicon.\n\n"
+              << "  Convert a VCB circuit to synthesizable Verilog for simulation or FPGA use.\n"
+              << "  Input and output files may also be given with --input and --output.\n\n"
               << "Options:\n"
-              << "  -i, --input <file>         Path to input .vcb file\n"
-              << "                             (can also be passed directly as 1st positional argument)\n"
-              << "  -o, --output <file>        Path to output .v file\n"
-              << "                             (default: input stem + .v, or '-' for stdout)\n"
-              << "  -m, --module <name>        Top-level Verilog module name\n"
-              << "                             (default: derived from input file stem)\n"
-              << "  -c, --clock-period <N>     Clock divider period in FPGA cycles (default: 2)\n"
-              << "  -e, --expose-inputs        Expose undriven traces as top-level input ports (default)\n"
-              << "      --no-expose-inputs     Tie undriven traces to ground (1'b0)\n"
-              << "  -v, --verbose              Display detailed translation stages & circuit statistics\n"
-              << "      --no-opt               Disable automatic Yosys optimization of the output Verilog\n"
-              << "  -O, --opt-level <level>    Optimization level: 'opt' (default) or 'full'\n"
-              << "      --mem <file>           Override virtual memory contents with a .vcbmem file\n"
-              << "      --clock {auto,on,off}   Set clk/rst generation. 'auto' (default) detects sequential elements. 'off' combinational only. 'on' forced sync\n                             Use --clock on for 100% correct behavior; default auto may break due to tick timing.\n"
-              << "  -h, --help                 Show this help message and exit\n"
-              << "      --version              Show version information and exit\n\n"
-              << "Note: By default the generated Verilog is optimized with Yosys (optional dependency).\n"
-              << "      If Yosys is not found in PATH, a warning is printed and the raw .v file is kept.\n\n"
+              << "  Input / Output:\n"
+              << "    -i, --input <file>       Input .vcb file (default: first positional arg)\n"
+              << "    -o, --output <file>      Output file (default: input path with .v suffix)\n"
+              << "                             Use '-' to write Verilog to stdout.\n"
+              << "    -m, --module <name>      Module (default: sanitized input file stem)\n\n"
+              << "  Verilog Generation:\n"
+              << "    -e, --expose-inputs      Expose undriven traces feeding logic as input ports\n"
+              << "                             (disabled by default).\n"
+              << "        --no-expose-inputs   Tie undriven traces to 1'b0 (default behavior).\n"
+              << "    -M, --mem <file>         Override from .vcbmem (default: use embedded .vcb\n"
+              << "                             memory; no external file is set).\n\n"
+              << "  Clock Configuration:\n"
+              << "        --clock <mode>       Clock mode: auto, on, or off (default: auto).\n"
+              << "                             auto: infer sequential elements from topology; VCB\n"
+              << "                               ticks can make intended timing ambiguous.\n"
+              << "                             on: force clk/rst and register all gates.\n"
+              << "                               Use when auto misses required clocking.\n"
+              << "                             off: request combinational output; sequential\n"
+              << "                               elements may not work correctly in this mode.\n"
+              << "                               Virtual memory still uses a clock.\n"
+              << "    -c, --clock-period <N>   Divider period for VCB Clock elements, in input clk\n"
+              << "                             cycles (default: 2; minimum: 2).\n\n"
+              << "  Optimization:\n"
+              << "        --no-opt             Disable Yosys optimization (disabled by default);\n"
+              << "                             default: use Yosys for file output.\n"
+              << "    -O, --opt-level <level>  Yosys level: opt (default) or full.\n"
+              << "                             --no-opt disables optimization at either level.\n\n"
+              << "  General:\n"
+              << "    -v, --verbose            Show translation stages and circuit statistics\n"
+              << "                             (disabled by default).\n"
+              << "        --debug              Emit topology logs (disabled by default).\n"
+              << "    -h, --help               Show this help and exit (not shown by default).\n"
+              << "        --version            Show version and exit (not shown by default).\n\n"
+              << "Dependencies:\n"
+              << "  Yosys is optional. If unavailable, the raw Verilog is kept. Optimization is\n"
+              << "  skipped when writing Verilog to stdout.\n\n"
               << "Examples:\n"
-              << "  " << progName << " circuit.vcb\n"
-              << "  " << progName << " circuit.vcb -o output.v\n"
-              << "  " << progName << " -i circuit.vcb -o output.v -m my_circuit -v\n";
+              << "  vcb2verilog circuit.vcb\n"
+              << "  vcb2verilog circuit.vcb -o output.v\n"
+              << "  vcb2verilog circuit.vcb --module adder_top\n"
+              << "  vcb2verilog circuit.vcb --expose-inputs\n"
+              << "  vcb2verilog circuit.vcb --clock on\n"
+              << "  vcb2verilog circuit.vcb --mem initial.vcbmem\n"
+              << "  vcb2verilog circuit.vcb -o -\n"
+              << "  vcb2verilog circuit.vcb --verbose\n\n"
+              << "Exit Codes:\n"
+              << "  0  Success, including --help and --version.\n"
+              << "  1  Input, option, or conversion error.\n";
 }
 
 int main(int argc, char** argv) {
@@ -61,7 +89,7 @@ int main(int argc, char** argv) {
     std::string outputFile;
     std::string moduleName;
     unsigned long long clockPeriod = 2;
-    bool exposeInputs = false;
+    bool exposeInputs = false; // Undriven traces are tied low unless explicitly exposed.
     bool verbose = false;
     bool optimize = true;
     std::string optLevel = "opt";
@@ -73,8 +101,7 @@ int main(int argc, char** argv) {
         std::string arg = argv[i];
 
         if (arg == "-h" || arg == "--help") {
-            printBanner();
-            printHelp(argv[0]);
+            printHelp();
             return 0;
         } else if (arg == "--version") {
             std::cout << "vcb2verilog version " << VERSION << "\n";
@@ -160,9 +187,8 @@ int main(int argc, char** argv) {
 
     // 2. Verify input file was provided
     if (inputFile.empty()) {
-        printBanner();
         std::cerr << "Error: No input .vcb file specified!\n\n";
-        printHelp(argv[0]);
+        printHelp();
         return 1;
     }
 
@@ -196,6 +222,7 @@ int main(int argc, char** argv) {
         fs::path p(inputFile);
         outputFile = p.replace_extension(".v").string();
     }
+    std::ostream& statusOutput = outputFile == "-" ? std::cerr : std::cout;
 
     // Check that target directory for output file exists
     if (outputFile != "-") {
@@ -215,7 +242,7 @@ int main(int argc, char** argv) {
 
     if (outputFile != "-") {
         printBanner();
-        std::cout << "Input file   : " << inputFile << "\n"
+        statusOutput << "Input file   : " << inputFile << "\n"
                   << "Output file  : " << outputFile << "\n"
                   << "Module name  : " << moduleName << "\n"
                   << "Clock period : " << clockPeriod << " cycles\n"
@@ -228,7 +255,7 @@ int main(int argc, char** argv) {
     openVCB::Project proj;
     proj.clockPeriod = clockPeriod;
 
-    if (verbose) std::cout << "[1/3] Loading and decompressing VCB circuit...\n";
+    if (verbose) statusOutput << "[1/3] Loading and decompressing VCB circuit...\n";
     if (!proj.readFromVCB(inputFile)) {
         std::cerr << "Error: Failed to parse or decompress circuit from: \"" << inputFile << "\"\n";
         return 1;
@@ -241,13 +268,13 @@ int main(int argc, char** argv) {
 
     // 5. Topology analysis and netlist generation
     if (verbose) {
-        std::cout << "[2/3] Analyzing circuit topology ("
+        statusOutput << "[2/3] Analyzing circuit topology ("
                   << proj.width << "x" << proj.height << " grid)...\n";
     }
     proj.preprocess(false);
 
     if (verbose) {
-        std::cout << "      Discovered " << proj.numGroups << " logic groups with "
+        statusOutput << "      Discovered " << proj.numGroups << " logic groups with "
                   << proj.writeMap.nnz << " wire connections.\n";
     }
 
@@ -291,7 +318,7 @@ int main(int argc, char** argv) {
             }
             proj.vmem[i] = (int)val;
         }
-        std::cout << "Loaded virtual memory contents from: " << memFile << "\n";
+        statusOutput << "Loaded virtual memory contents from: " << memFile << "\n";
     }
 
     // Export initial memory contents to .mem file (hex) if virtual memory present
@@ -312,14 +339,14 @@ int main(int argc, char** argv) {
                 memOut << std::hex << std::setw(8) << std::setfill('0') << proj.vmem[i] << std::dec << "\n";
             }
             memOut.close();
-            std::cout << "Exported virtual memory init file: " << memFilePath << "\n";
+            statusOutput << "Exported virtual memory init file: " << memFilePath << "\n";
         } else {
             std::cerr << "Warning: Could not write memory init file: " << memFilePath << "\n";
         }
     }
 
     // 6. Emit synthesizable Verilog HDL
-    if (verbose) std::cout << "[3/3] Emitting synthesizable Verilog...\n";
+    if (verbose) statusOutput << "[3/3] Emitting synthesizable Verilog...\n";
 
     VerilogEmitter emitter(proj);
     emitter.exposeZeroInDegreeTraces = exposeInputs;
@@ -329,10 +356,10 @@ int main(int argc, char** argv) {
     emitter.vmemMemFile = memFilePath.empty() ? std::string() : memFilePath;
 
     if (clockMode == "off" && emitter.hasSequentialElements()) {
-        std::cout << "WARNING: Circuit contains sequential elements (e.g. T-flip-flops, memory), but clock mode is 'off'. These may not work correctly without 'clk'.\n";
+        statusOutput << "WARNING: Circuit contains sequential elements (e.g. T-flip-flops, memory), but clock mode is 'off'. These may not work correctly without 'clk'.\n";
     }
     if (clockMode == "off" && emitter.getNumLoopBreaks() > 0) {
-        std::cout << "WARNING: Circuit contains combinational loop(s), but clock mode is 'off'. Raw feedback may cause 'x' states in simulation or synthesis errors.\n";
+        statusOutput << "WARNING: Circuit contains combinational loop(s), but clock mode is 'off'. Raw feedback may cause 'x' states in simulation or synthesis errors.\n";
     }
 
     if (!emitter.emit(outputFile, moduleName)) {
@@ -344,7 +371,7 @@ int main(int argc, char** argv) {
     if (optimize && outputFile != "-") {
         // Check whether yosys is available in PATH
         if (std::system("command -v yosys > /dev/null 2>&1") != 0) {
-            std::cout << "Warning: 'yosys' not found in PATH. Skipping optimization; raw .v file kept.\n";
+            statusOutput << "Warning: 'yosys' not found in PATH. Skipping optimization; raw .v file kept.\n";
         } else {
             std::string script;
             if (optLevel == "full") {
@@ -358,7 +385,7 @@ int main(int argc, char** argv) {
             std::string cmd = "yosys -q -p \"read_verilog " + outputFile +
                               "; " + script + "; write_verilog -noattr " + tmpFile + "\" > /dev/null 2>&1";
 
-            std::cout << "Optimizing output with Yosys (level: " << optLevel << ")...\n";
+            statusOutput << "Optimizing output with Yosys (level: " << optLevel << ")...\n";
             int rc = std::system(cmd.c_str());
             if (rc == 0) {
                 std::error_code ec;
@@ -366,16 +393,16 @@ int main(int argc, char** argv) {
                     std::filesystem::remove(outputFile, ec);
                     std::filesystem::rename(tmpFile, outputFile, ec);
                     if (ec) {
-                        std::cout << "Warning: Yosys succeeded but could not replace output file: " << ec.message() << "\n";
+                        statusOutput << "Warning: Yosys succeeded but could not replace output file: " << ec.message() << "\n";
                         std::filesystem::remove(tmpFile, ec);
                     } else {
-                        std::cout << "Yosys optimization completed successfully.\n";
+                        statusOutput << "Yosys optimization completed successfully.\n";
                     }
                 } else {
-                    std::cout << "Warning: Yosys finished but produced no output. Raw .v file kept.\n";
+                    statusOutput << "Warning: Yosys finished but produced no output. Raw .v file kept.\n";
                 }
             } else {
-                std::cout << "Warning: Yosys optimization failed (exit code " << rc << "). Raw .v file kept.\n";
+                statusOutput << "Warning: Yosys optimization failed (exit code " << rc << "). Raw .v file kept.\n";
                 std::error_code ec;
                 std::filesystem::remove(tmpFile, ec);
             }
@@ -386,7 +413,7 @@ int main(int argc, char** argv) {
     double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
     if (outputFile != "-") {
-        std::cout << "-----------------------------------------------------\n"
+        statusOutput << "-----------------------------------------------------\n"
                   << "Translation completed successfully in " << ms << " ms!\n"
                   << "  Total groups/gates : " << proj.numGroups << "\n"
                   << "  Wire connections   : " << proj.writeMap.nnz << "\n"

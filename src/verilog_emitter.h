@@ -18,9 +18,10 @@ class VerilogEmitter {
 public:
     explicit VerilogEmitter(openVCB::Project& proj);
 
-    /// If true, traces with in-degree 0 that drive internal gates are exposed as input ports
+    /// If true, undriven traces that drive gates are exposed as input ports.
+    /// Defaults to false, which makes their empty-input expression evaluate to 1'b0.
     bool exposeZeroInDegreeTraces = false;
-    /// Custom clock period (number of ticks per pulse)
+    /// Divider period, in input clk cycles, for generated VCB Clock elements.
     unsigned long long clockPeriod = 2;
 
     /// Clock mode: auto, on, off

@@ -1,239 +1,177 @@
 # vcb2verilog
 
-**vcb2verilog** is an open-source command-line tool that transpiles digital circuit blueprints designed in the sandbox game [Virtual Circuit Board (VCB)](https://store.steampowered.com/app/1885690/Virtual_Circuit_Board/) into clean, synthesizable **Verilog HDL** for real FPGA hardware (e.g., Lattice iCE40, ECP5, Xilinx Artix/Spartan, Gowin) and Verilog simulators.
+`vcb2verilog` converts Virtual Circuit Board (VCB) projects into Verilog HDL.
+It reads `.vcb` project files and writes a Verilog module that can be simulated
+or passed to an FPGA synthesis tool. It does not assign board pins or program
+FPGA hardware.
 
----
+The reader handles the Godot-style and JSON VCB project formats. Circuit layers
+are compressed with Zstandard.
 
-> [!WARNING]
-> ### AI Development Disclaimer
-> This project was developed and refactored with the assistance of artificial intelligence (LLM coding agents). While the generated code has been compiled, analyzed, and verified with test projects, **AI can make mistakes**. Circuit designs intended for safety-critical systems or production hardware should always be independently reviewed, simulated (e.g., via Icarus Verilog or Verilator), and validated before deployment on physical silicon.
+## Features
 
----
+- Combinational gates: AND, OR, NOT, NAND, NOR, XOR, and XNOR.
+- READ and WRITE connections, LEDs, traces, and bundles.
+- BUS and Mesh merging for compatible components of the same logic type. BUS
+  is a component-merging mechanism, not a signal wire. Mesh joins matching
+  components across the design.
+- Tunnel links to the first Tunnel found along a straight row or column.
+- Cross preserves separate paths through a crossing.
+- Clocked elements and VCB virtual memory, with behavior controlled by the
+  clock options below.
 
-## Key Features
+## Build
 
-- **Direct VCB to Verilog Transpilation**: Converts `.vcb` files (both VCB v1 Godot format and VCB v2 JSON base64 format) into standard, synthesizable Verilog HDL.
-- **Continuous Combinational Logic**: Translates logic gates (`AND`, `OR`, `NOT`, `NAND`, `NOR`, `XOR`, `XNOR`, `TRACE`, `BUNDLE`) into asynchronous continuous assignments (`assign`), propagating signals in nanoseconds on FPGA LUTs without waiting for software game ticks.
-- **Hardware-Accurate Latches (T-Flip-Flop)**: Maps VCB Latch memory elements into clocked T-Flip-Flops with rising-edge detection (`always @(posedge clk)`). Latches without internal driving inputs are automatically exposed as external pushbutton (`btn_X_Y`) inputs, named after their grid coordinates.
-- **Pipeline Delay Buffers (D-Flip-Flop)**: Translates 1-tick delay VCB Buffers into synchronous D-type flip-flop registers.
-- **Top-Level Ports & LEDs**: Automatically maps boundary READ/WRITE pins and game LEDs to top-level module ports. Port names now carry the element's real grid coordinates (e.g. `input wire input_X_Y`, `output wire output_X_Y`, `output wire led_X_Y`, `input wire btn_X_Y`), which makes FPGA pin mapping much easier.
-- **Open-Source EDA Toolchain Integration**: Designed for seamless synthesis with **Yosys**, place-and-route with **nextpnr**, and simulation with **Icarus Verilog** (`iverilog`).
-- **Blazing Fast**: Parses, processes 2D grid connectivity, and emits Verilog for 130,000+ gate microarchitectures in under **200 milliseconds**.
+Requirements: a C++17 compiler, CMake 3.14 or newer, Zstandard development
+files, and GLM headers. OpenMP is optional.
 
----
+On Debian or Ubuntu:
 
-## Requirements & Dependencies
-
-- **C++17** compatible compiler (GCC 9+, Clang 10+, or MSVC 2019+)
-- **CMake** 3.14 or newer
-- **libzstd-dev** (Zstandard compression library)
-- **libglm-dev** (OpenGL Mathematics header library)
-- **libomp-dev** (OpenMP for multithreaded grid parsing, optional)
-
-### Installing Dependencies
-
-**Ubuntu / Debian / Raspberry Pi OS:**
 ```bash
 sudo apt update
-sudo apt install -y build-essential cmake libzstd-dev libglm-dev libomp-dev
+sudo apt install build-essential cmake libzstd-dev libglm-dev
+# Optional: OpenMP support
+sudo apt install libomp-dev
 ```
 
-**Fedora / RHEL:**
-```bash
-sudo dnf install -y gcc-c++ cmake zstd-devel glm-devel
-```
-
-**Arch Linux:**
-```bash
-sudo pacman -S base-devel cmake zstd glm openmp
-```
-
----
-
-## Build & Installation
-
-### Build with CMake
+Build from the repository root:
 
 ```bash
-git clone https://github.com/Viking0001/vcb2verilog.git vcb2verilog
-cd vcb2verilog
-mkdir build && cd build
-cmake ..
-make -j$(nproc)
+cmake -S . -B build
+cmake --build build -j
 ```
 
-The compiled executable `vcb2verilog` will be created inside the `build/` directory.
+The executable is `build/vcb2verilog`.
 
-### Direct Build with g++ (without CMake)
+## Usage
 
 ```bash
-g++ -std=c++17 -O3 -Wall -Wno-switch -Wno-unused-parameter \
-    src/main.cpp \
-    src/verilog_emitter.cpp \
-    src/openVCB.cpp \
-    src/openVCBReader.cpp \
-    src/openVCBBlueprint.cpp \
-    src/openVCBPreprocessing.cpp \
-    src/openVCBAssembler.cpp \
-    src/openVCBExpr.cpp \
-    gorder/Graph.cpp \
-    gorder/Util.cpp \
-    gorder/UnitHeap.cpp \
-    -Isrc -I. -lzstd -fopenmp -o vcb2verilog
+./build/vcb2verilog [OPTIONS] <input.vcb> [output.v]
 ```
 
----
+For example, convert the included counter project:
 
-## Quick Start & CLI Usage
-
-```
-vcb2verilog [OPTIONS] <input.vcb> [-o <output.v>]
-vcb2verilog -i <input.vcb> [-o <output.v>]
-```
-
-### Options
-
-| Flag | Argument | Description | Default |
-|---|---|---|---|
-| `-i, --input` | `<file>` | Path to the input `.vcb` file | *1st positional argument* |
-| `-o, --output` | `<file>` | Output `.v` file path (`-` for stdout) | `<input_stem>.v` |
-| `-m, --module` | `<name>` | Name of the generated Verilog top module | Derived from input |
-| `-c, --clock-period` | `<N>` | Clock divider period (FPGA cycles per VCB tick) | `2` |
-| `-e, --expose-inputs` | *None* | Expose undriven traces as top-level `input wire` | Enabled |
-| `--no-expose-inputs` | *None* | Tie undriven traces to constant `1'b0` | Disabled |
-| `-v, --verbose` | *None* | Print detailed translation steps & netlist stats | Disabled |
-| `--no-opt` | *None* | Disable automatic Yosys optimization of the output Verilog | Disabled |
-| `-O, --opt-level` | `<level>` | Optimization level: `opt` (default) or `full` | `opt` |
-| `-h, --help` | *None* | Display help message and exit | |
-| `--version` | *None* | Display version information and exit | |
-
-### Conversion Example
-
-Convert the included 2-bit counter example:
 ```bash
 ./build/vcb2verilog examples/counter_2bit.vcb -o counter_2bit.v
 ```
 
-Output:
-```
-=====================================================
- vcb2verilog v1.0.0 - Virtual Circuit Board to Verilog
- Target: Synthesizable Verilog HDL for FPGA
-=====================================================
-Input file   : examples/counter_2bit.vcb
-Output file  : counter_2bit.v
-Module name  : counter_2bit
-Clock period : 2 cycles
------------------------------------------------------
-Translation completed successfully in 35.9 ms!
-  Total groups/gates : 7
-  Wire connections   : 6
-  Input ports        : 2
-  Output ports       : 1
-  LED outputs        : 1
-  Combinational gates: 4
-  Registers (D-FF)   : 0
-  Latches (T-FF)     : 2
-  Clock dividers     : 0
-Generated file: counter_2bit.v
-=====================================================
-```
+If no output path is given, the input path is used with its extension replaced
+by `.v`. Use `-o -` to write Verilog to stdout; status messages go to stderr.
+The default module name is the sanitized input filename stem.
 
----
+### Options
 
-## Hardware Synthesis & Simulation Verification
+| Option | Description and default |
+|---|---|
+| `-i, --input <file>` | Input `.vcb` file. Defaults to the first positional argument; required if none is given. |
+| `-o, --output <file>` | Output Verilog file. Defaults to the input path with `.v` extension. `-` writes to stdout. |
+| `-m, --module <name>` | Top-level module name. Defaults to the sanitized input filename stem. |
+| `-e, --expose-inputs` | Expose eligible undriven READ/Trace/Bundle groups as input ports. Disabled by default. |
+| `--no-expose-inputs` | Tie eligible undriven READ/Trace/Bundle groups to `1'b0`. This is the default. |
+| `--clock <mode>` | Clock mode: `auto` (default), `on`, or `off`. See [Clock behavior](#clock-behavior). |
+| `-c, --clock-period <N>` | Divider period for VCB Clock elements, in input `clk` cycles. Defaults to `2`; values below `2` are clamped to `2`. |
+| `--no-opt` | Disable Yosys optimization. Disabled by default. |
+| `-O, --opt-level <level>` | Yosys optimization level: `opt` (default) or `full`. Ignored when `--no-opt` is used. |
+| `-M, --mem <file>` | Override memory with a `.vcbmem` file. If omitted, memory data embedded in the input `.vcb` is used. |
+| `-v, --verbose` | Print translation stages and circuit statistics. Disabled by default. |
+| `--debug` | Print detailed topology diagnostics. Disabled by default. |
+| `-h, --help` | Show command-line help. Not shown by default. |
+| `--version` | Show the program version. Not printed by default. |
 
-### 1. Verification with Icarus Verilog Simulation
+Run `./build/vcb2verilog --help` for the full help text.
 
-You can verify the syntax and simulate the generated Verilog using `iverilog`:
+### Examples
 
 ```bash
-# Check syntax & compile simulation
-iverilog -Wall -g2012 counter_2bit.v -o sim.out
+# Choose an output file and module name
+./build/vcb2verilog circuit.vcb -o output.v --module my_circuit
+
+# Expose undriven traces as inputs
+./build/vcb2verilog circuit.vcb --expose-inputs
+
+# Force clock and reset generation
+./build/vcb2verilog circuit.vcb --clock on
+
+# Replace embedded virtual-memory contents
+./build/vcb2verilog memory_project.vcb --mem initial.vcbmem
+
+# Send only Verilog to stdout
+./build/vcb2verilog circuit.vcb -o - > output.v
+
+# Show translation progress and statistics
+./build/vcb2verilog circuit.vcb --verbose
 ```
 
-### 2. FPGA Synthesis with Yosys (e.g. Lattice iCE40)
+## Signal and component behavior
 
-Run synthesis to gate-level netlist:
+By default, eligible undriven READ, Trace, and Bundle groups that feed logic are
+assigned `1'b0`. `--expose-inputs` promotes them to top-level inputs named
+`input_X_Y`. WRITE and LED groups become output ports named `output_X_Y` and
+`led_X_Y`. Free Latch controls can appear as `sw_X_Y` inputs. Sequential
+circuits may also have `clk` and `rst` ports.
+
+An ordinary Bundle carries routed signal connections. BUS and Mesh merge
+compatible components of the same logic type into one logical group. A Tunnel
+links matching groups through the first Tunnel encountered in a straight
+direction. Cross keeps intersecting paths separate.
+
+## Clock behavior
+
+- `auto` (default) adds `clk` and `rst` when the circuit graph contains
+  recognized sequential elements. VCB tick timing can make the intended timing
+  unclear for some circuits.
+- `on` always adds `clk` and `rst` and registers all gates. Use it only when
+  the circuit is designed for synchronous gate behavior.
+- `off` requests combinational output. Stateful elements may not work correctly
+  in this mode. Virtual memory still uses a clock.
+
+In `auto` and `off` modes, Buffer elements are treated as combinational logic,
+not as one-cycle delays. In `on` mode, Buffers are clocked. `--clock-period`
+controls the divider period for VCB Clock elements; it is measured in cycles
+of the input `clk`.
+
+## Virtual memory
+
+For projects with VCB virtual memory enabled, the converter emits a Verilog
+memory initialized with `$readmemh` and writes a hex `.mem` initialization file
+next to the output Verilog file (or in the working directory for stdout
+output). The `.vcb` project's embedded memory data is used by default.
+`--mem <file.vcbmem>` (or `-M`) replaces it with an external binary memory file.
+The project must contain virtual memory to use this option.
+
+## Yosys optimization
+
+Yosys is optional. When it is available, the converter runs the generated file
+through Yosys using `opt` by default. `-O full` selects a more extensive
+optimization pass. `--no-opt` skips optimization. Optimization is also skipped
+when output is sent to stdout. If Yosys is unavailable, the converter keeps the
+generated Verilog without optimization.
+
+## Tests
+
+Build the executable, then run the regression suite:
 
 ```bash
-# Synthesize to iCE40 primitives with Yosys
-yosys -p "synth_ice40 -top counter_2bit -json counter_2bit.json" counter_2bit.v
+cmake --build build -j
+python3 tests/run_tests.py
 ```
 
-### 3. Place & Route and Bitstream Generation (nextpnr + IceStorm)
+The test suite uses Yosys and Icarus Verilog (`iverilog`). It also needs either
+the `zstd` command-line tool or Python's `zstandard` package to generate test
+projects.
 
-```bash
-# Place and Route targeting an iCE40-HX1K chip
-nextpnr-ice40 --hx1k --package tq144 --json counter_2bit.json --pcf pins.pcf --asc counter_2bit.asc
+## Project layout
 
-# Pack into FPGA bitstream
-icepack counter_2bit.asc counter_2bit.bin
+- `src/main.cpp` — command-line interface and conversion flow.
+- `src/openVCBReader.cpp` — VCB project loading.
+- `src/openVCBPreprocessing.cpp` — pixel connectivity and component grouping.
+- `src/verilog_emitter.cpp` — Verilog generation.
+- `examples/` — sample VCB projects.
+- `tests/run_tests.py` — regression tests.
+- `gorder/` — bundled graph-ordering code.
 
-# Flash bitstream to FPGA board (e.g., IceBreaker, iCEstick)
-iceprog counter_2bit.bin
-```
+## License and acknowledgements
 
----
-
-## VCB Element Mapping Reference
-
-| VCB Ink Element | Internal Logic | Verilog Representation | Hardware Implementation |
-|---|---|---|---|
-| **READ** | Abstract Input Port | `input wire input_X_Y` | External FPGA pin / button (X, Y = grid coordinates) |
-| **WRITE** | Abstract Output Port | `output wire output_X_Y` | External FPGA pin / pad (X, Y = grid coordinates) |
-| **LED** | Visual Indicator | `output wire led_X_Y` | On-board FPGA LED (X, Y = grid coordinates) |
-| **TRACE / BUNDLE** | Wire / 16-color Bus | `assign g_N = in1 \| in2;` | Combinational routing network |
-| **CROSS** | Isolated Wire Crossing | Independent Net Labels | Physical 3D routing on FPGA metal layers |
-| **BUFFER** | 1-tick Game Delay | `always @(posedge clk) g_N <= in;` | 1-cycle D Flip-Flop register |
-| **LATCH** | Toggle on Input Pulse | `if (in && !prev) q <= ~q;` | Clocked T Flip-Flop with edge detector |
-| **CLOCK** | Periodic Game Clock | Synchronous 32-bit Counter | Parameterized frequency divider on `clk` |
-| **AND / NAND** | All Inputs Active | `assign g_N = in1 & in2;` | FPGA Look-Up Table (LUT) |
-| **OR / NOR** | Any Input Active | `assign g_N = in1 \| in2;` | FPGA Look-Up Table (LUT) |
-| **XOR / XNOR** | Parity Checker | `assign g_N = in1 ^ in2;` | FPGA Look-Up Table (LUT) |
-| **BREAKPOINT** | Simulation Pause | *Ignored* | Omitted from synthesizable hardware |
-
----
-
-## Acknowledgements
-This project is inspired by and builds upon the file format concepts of [openVCB](https://github.com/kittybupu/openVCB).
-
-## License & Credits
-
-- Licensed under the **GNU General Public License v3.0 (GPL-3.0-or-later)**. See [LICENSE.md](LICENSE.md).
-- Based on the original open-source [openVCB](https://github.com/kittybupu/openVCB) parser by Jerry.
-- Virtual Circuit Board is developed by Corbinian. Available on [Steam](https://store.steampowered.com/app/1885690/Virtual_Circuit_Board/).
-
-
-## Output Optimization with Yosys
-
-By default, `vcb2verilog` runs the generated Verilog through **Yosys** (if available) to clean up and optimize the netlist. Yosys is an **optional dependency**: if it is not installed or not found in `PATH`, the tool prints a warning and keeps the raw (unoptimized) `.v` file.
-
-Optimization levels:
-- `opt` (default): quick cleanup using `proc; opt; opt_clean -purge`.
-- `full`: deeper logic optimization using ABC with `proc; opt -full; abc -g AND,OR,XOR,NAND,NOR,XNOR; opt_clean -purge`.
-
-CLI switches:
-- `--no-opt`: completely disable automatic Yosys optimization.
-- `-O <level>`, `--opt-level <level>`: choose `opt` or `full`.
-
-This coordinate-based port naming (e.g. `input_X_Y`, `output_X_Y`, `led_X_Y`, `btn_X_Y`) is preserved through optimization and helps when mapping pins on an FPGA.
-
-
-## Virtual Memory (BRAM) Support
-
-Projects with VCB Virtual Memory enabled are emitted as a synthesizable Block RAM (BRAM) template:
-- `reg [DATA_WIDTH-1:0] mem_X_Y [0:DEPTH-1];`
-- `initial $readmemh("<module>_mem_X_Y.mem", mem_X_Y);`
-- synchronous read on `posedge clk`.
-
-An initialization file (`<module>_mem_X_Y.mem`) in hex format is generated next to the output `.v` file.
-
-CLI switch:
-- `--mem <file.vcbmem>` (or `-M <file.vcbmem>`): override the default memory contents stored in the `.vcb` file with an external `.vcbmem` binary file.
-
-Yosys optimization (`opt` and `full`) is compatible with the generated BRAM.
-
-Note: Use `--clock on` for guaranteed correct synchronous behavior. Default `auto` may break due to tick timing.
-
-Run tests: `python3 tests/run_tests.py`
+The project is licensed under GPL-3.0-or-later; see [LICENSE.md](LICENSE.md).
+It builds on the openVCB file-format parser by [Jerry](https://github.com/kittybupu/openVCB).
+Virtual Circuit Board is available on [Steam](https://store.steampowered.com/app/1885690/Virtual_Circuit_Board/).

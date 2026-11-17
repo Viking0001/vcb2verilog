@@ -367,6 +367,74 @@ def main() -> int:
 
     tests.append(("4_no_spurious_input_ports", test_no_spurious_inputs))
 
+    def test_undriven_trace_exposure_options():
+        grid = [["Trace", "R", "AND", "W", "LED"]]
+        vcb = os.path.join(TMP_DIR, "undriven_trace.vcb")
+        default_v = os.path.join(TMP_DIR, "undriven_trace_default.v")
+        explicitly_tied_v = os.path.join(TMP_DIR, "undriven_trace_tied.v")
+        exposed_v = os.path.join(TMP_DIR, "undriven_trace_exposed.v")
+        build_vcb(grid, vcb)
+
+        # With no exposure flag, an undriven trace remains internal and is low.
+        default_res = subprocess.run(
+            [BIN, "--no-opt", vcb, "-o", default_v], capture_output=True, text=True,
+        )
+        if default_res.returncode != 0:
+            raise RuntimeError(f"vcb2verilog selhal:\n{default_res.stdout}\n{default_res.stderr}")
+        _, inputs, _, code = parse_ports(default_v)
+        assert not inputs, f"Default conversion exposed undriven inputs: {inputs}"
+        assert re.search(r"assign g_\d+ = 1'b0;  // TRACE ", code), \
+            "Default conversion must tie the undriven trace to 1'b0"
+        assert "[DEBUG]" not in default_res.stderr, \
+            "Debug diagnostics should be disabled by default"
+
+        # The explicit opt-out must preserve the same tied-low behavior.
+        res = subprocess.run(
+            [BIN, "--no-expose-inputs", "--no-opt", vcb, "-o", explicitly_tied_v],
+            capture_output=True, text=True,
+        )
+        if res.returncode != 0:
+            raise RuntimeError(f"vcb2verilog selhal:\n{res.stdout}\n{res.stderr}")
+        _, tied_inputs, _, tied_code = parse_ports(explicitly_tied_v)
+        assert not tied_inputs, f"--no-expose-inputs created inputs: {tied_inputs}"
+        assert re.search(r"assign g_\d+ = 1'b0;  // TRACE ", tied_code), \
+            "--no-expose-inputs must tie the undriven trace to 1'b0"
+
+        # The explicit opt-in promotes the same source to a top-level input.
+        res = subprocess.run(
+            [BIN, "--expose-inputs", "--no-opt", vcb, "-o", exposed_v],
+            capture_output=True, text=True,
+        )
+        if res.returncode != 0:
+            raise RuntimeError(f"vcb2verilog selhal:\n{res.stdout}\n{res.stderr}")
+        _, exposed_inputs, _, exposed_code = parse_ports(exposed_v)
+        assert exposed_inputs, "--expose-inputs did not create a top-level input"
+        assert any(
+            re.search(r"assign g_\d+ = " + re.escape(name) + r";", exposed_code)
+            for name in exposed_inputs
+        ), "Generated logic does not reference the exposed input"
+
+        debug_res = subprocess.run(
+            [BIN, "--debug", "--no-opt", vcb, "-o", exposed_v],
+            capture_output=True, text=True,
+        )
+        assert debug_res.returncode == 0, debug_res.stderr
+        assert "[DEBUG]" in debug_res.stderr, "--debug did not enable debug diagnostics"
+
+        # Status messages must not be mixed into Verilog written to stdout.
+        stdout_res = subprocess.run(
+            [BIN, "--verbose", "--no-opt", vcb, "-o", "-"],
+            capture_output=True, text=True,
+        )
+        if stdout_res.returncode != 0:
+            raise RuntimeError(f"stdout conversion failed:\n{stdout_res.stderr}")
+        assert stdout_res.stdout.startswith("// ==="), \
+            "-o - must write Verilog to stdout without status messages"
+        assert "[1/3]" not in stdout_res.stdout, \
+            "Verbose status output must not be mixed into Verilog stdout"
+
+    tests.append(("undriven_trace_exposure_defaults", test_undriven_trace_exposure_options))
+
     def test_bus_channel_isolation():
         grid = [
             ["Latch", "W", "BUS2", ".",    ".",   ".", "."],
