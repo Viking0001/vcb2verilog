@@ -279,6 +279,13 @@ namespace openVCB {
                                 visited[nidx] |= 1;
                                 stack.push_back(np);
                             }
+                            else if ((setOff(ink) == Ink::AndOff || setOff(ink) == Ink::OrOff || setOff(ink) == Ink::XorOff ||
+                                      setOff(ink) == Ink::NotOff || setOff(ink) == Ink::NandOff || setOff(ink) == Ink::NorOff ||
+                                      setOff(ink) == Ink::XnorOff || setOff(ink) == Ink::BufferOff) &&
+                                     newInk == Ink::BundleOff) {
+                                visited[nidx] |= 1;
+                                stack.push_back(np);
+                            }
                             else if (ink != Ink::TraceOff && ink != Ink::BundleOff &&
                                      ink != Ink::Mesh && ink != Ink::Tunnel &&
                                      (newInk == Ink::BundleOff || newInk == Ink::Mesh || newInk == Ink::Tunnel)) {
