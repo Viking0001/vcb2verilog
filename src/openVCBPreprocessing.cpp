@@ -28,12 +28,10 @@ namespace openVCB {
         const std::vector<ivec2>& meshPixels) {
 
         auto jumpTunnel = [&](ivec2 entryPos, ivec2 dir) {
-            ivec2 tp = entryPos;
-            while (tp.x >= 0 && tp.x < width && tp.y >= 0 && tp.y < height &&
-                   image[tp.x + tp.y * width].getInk() == Ink::Tunnel) {
-                visited[tp.x + tp.y * width] |= mask;
-                tp += dir;
-            }
+            // Each Tunnel pixel is an endpoint. The next Tunnel may be
+            // immediately adjacent, so skip only the source pixel itself.
+            visited[entryPos.x + entryPos.y * width] |= mask;
+            ivec2 tp = entryPos + dir;
             while (tp.x >= 0 && tp.x < width && tp.y >= 0 && tp.y < height) {
                 int tidx = tp.x + tp.y * width;
                 if (image[tidx].getInk() == Ink::Tunnel) {
@@ -145,11 +143,10 @@ namespace openVCB {
 #pragma omp parallel for schedule(static, 8192)
         for (int i = 0; i < width * height; i++) {
             Ink ink = (Ink)image[i].ink;
-            if (ink == Ink::Tunnel) {
-			image[i].ink = (int16_t)Ink::BundleOff;
-		} else {
-			image[i].ink = (int16_t)setOff(ink);
-		}
+            // Tunnels must remain identifiable: exploreBundle() uses their
+            // direction to find the first other tunnel along the same ray.
+            if (ink != Ink::Tunnel)
+                image[i].ink = (int16_t)setOff(ink);
         }
 
         std::vector<int> visited(width * height, 0);
@@ -165,10 +162,13 @@ namespace openVCB {
             indexImage[i] = -1;
 
         std::vector<ivec2> meshPixels;
+        std::vector<ivec2> tunnelPixels;
         for (int y = 0; y < height; y++)
             for (int x = 0; x < width; x++)
                 if (image[x + y * width].getInk() == Ink::Mesh)
                     meshPixels.push_back(ivec2(x, y));
+                else if (image[x + y * width].getInk() == Ink::Tunnel)
+                    tunnelPixels.push_back(ivec2(x, y));
 
         using Group = tuple<int, Logic, Ink>;
         vector<Group> indexDict;
@@ -182,6 +182,7 @@ namespace openVCB {
                 if (!(visited[x + y * width] & 1)) {
                     Ink ink = image[x + y * width].getInk();
                     if (ink == Ink::Cross || ink == Ink::None || ink == Ink::Bus || ink == Ink::Mesh ||
+                        ink == Ink::Tunnel ||
                         ink == Ink::Annotation || ink == Ink::Filler)
                         continue;
                     else if (ink == Ink::ReadOff) {
@@ -274,10 +275,11 @@ namespace openVCB {
                             }
                             else if (ink != Ink::TraceOff && ink != Ink::BundleOff &&
                                      ink != Ink::Mesh && ink != Ink::Tunnel &&
-                                     (newInk == Ink::BundleOff || newInk == Ink::Tunnel)) {
-                                // Preserve the existing Bundle/Tunnel merge
-                                // behavior. BUS and Mesh identities are resolved
-                                // deterministically after physical groups exist.
+                                     newInk == Ink::BundleOff) {
+                                // Ordinary bundles retain their legacy physical
+                                // merge behavior. BUS and Tunnel identities are
+                                // resolved deterministically after physical
+                                // groups exist.
                                 ++busGen;
                                 if (busVisited[nidx] != busGen) {
                                     std::vector<ivec2> gBusStack = { np };
@@ -299,7 +301,7 @@ namespace openVCB {
                                                 visited[bnidx] |= 1;
                                                 stack.push_back(bnp);
                                             }
-                                            else if ((bInk == Ink::BundleOff || bInk == Ink::Tunnel) &&
+                                            else if (bInk == Ink::BundleOff &&
                                                      busVisited[bnidx] != busGen) {
                                                 busVisited[bnidx] = busGen;
                                                 gBusStack.push_back(bnp);
@@ -315,11 +317,13 @@ namespace openVCB {
                     indexDict.push_back({ gid, inkLogicType(setOff(ink)), setOff(ink) });
                 }
 
-        // A BUS is a physical merge region, not a signal-graph node. First
-        // discover each connected BUS region, then union the compatible
-        // physical component groups touching that region. This pass runs
-        // after all physical groups have been identified, so row-major scan
-        // order cannot decide which group owns a BUS pixel.
+        // BUS regions and Tunnel links are merge resources, not logical
+        // components. Resolve physical BUS regions first, then pair Tunnel
+        // endpoints by the first other Tunnel in each cardinal direction.
+        // Each Tunnel pair merges only the groups touching those two
+        // endpoints; an empty intermediate Tunnel cannot relay a chain.
+        // All unions happen after physical groups exist, independent of scan
+        // order.
         const int physicalGroupCount = writeMap.n;
         std::vector<int> parent(physicalGroupCount);
         std::vector<int> rank(physicalGroupCount, 0);
@@ -349,8 +353,47 @@ namespace openVCB {
                    ink != Ink::Bus && ink != Ink::Mesh && ink != Ink::Cross && ink != Ink::None &&
                    ink != Ink::Filler && ink != Ink::Annotation;
         };
+        std::vector<std::uint64_t> traceMetaByGroup(physicalGroupCount, 0);
+        for (int idx = 0; idx < width * height; ++idx) {
+            int group = indexImage[idx];
+            if (group < 0 || group >= physicalGroupCount ||
+                setOff(image[idx].getInk()) != Ink::TraceOff) continue;
+            if (image[idx].meta < 64)
+                traceMetaByGroup[group] |= (std::uint64_t(1) << image[idx].meta);
+        }
 
+        // Row/column lookup finds the first Tunnel pixel along a ray. Tunnel
+        // pixels remain separate endpoints even when adjacent.
+        std::vector<std::vector<int>> tunnelsByRow(height);
+        std::vector<std::vector<int>> tunnelsByColumn(width);
+        for (const ivec2& tunnelPos : tunnelPixels) {
+            tunnelsByRow[tunnelPos.y].push_back(tunnelPos.x);
+            tunnelsByColumn[tunnelPos.x].push_back(tunnelPos.y);
+        }
+        auto firstTunnelAlong = [&](ivec2 pos, ivec2 dir) -> ivec2 {
+            const std::vector<int>& line = dir.x != 0
+                ? tunnelsByRow[pos.y]
+                : tunnelsByColumn[pos.x];
+            const int origin = dir.x != 0 ? pos.x : pos.y;
+            if (dir.x > 0 || dir.y > 0) {
+                auto it = std::upper_bound(line.begin(), line.end(), origin);
+                if (it == line.end()) return ivec2(-1, -1);
+                return dir.x != 0 ? ivec2(*it, pos.y) : ivec2(pos.x, *it);
+            }
+
+            auto it = std::lower_bound(line.begin(), line.end(), origin);
+            if (it == line.begin()) return ivec2(-1, -1);
+            --it;
+            return dir.x != 0 ? ivec2(*it, pos.y) : ivec2(pos.x, *it);
+        };
+
+        // Discover physical BUS regions as before. Keep their IDs so a
+        // Tunnel endpoint touching a BUS can inherit the components attached
+        // anywhere in that same BUS region.
         std::vector<unsigned char> busRegionVisited(width * height, 0);
+        std::vector<int> busRegionId(width * height, -1);
+        std::vector<std::unordered_map<int, int>> busGroupsByType;
+        std::vector<std::vector<int>> busTraceGroups;
         std::vector<ivec2> physicalBusStack;
         for (int y = 0; y < height; ++y) {
             for (int x = 0; x < width; ++x) {
@@ -358,8 +401,11 @@ namespace openVCB {
                 if (image[startIdx].getInk() != Ink::Bus || busRegionVisited[startIdx]) continue;
 
                 std::unordered_map<int, int> firstGroupByType;
+                std::vector<int> traceGroupsInRegion;
                 physicalBusStack.push_back(ivec2(x, y));
                 busRegionVisited[startIdx] = 1;
+                const int currentBusRegion = static_cast<int>(busGroupsByType.size());
+                busRegionId[startIdx] = currentBusRegion;
                 while (!physicalBusStack.empty()) {
                     ivec2 p = physicalBusStack.back();
                     physicalBusStack.pop_back();
@@ -369,9 +415,8 @@ namespace openVCB {
                         if (np.x < 0 || np.x >= width || np.y < 0 || np.y >= height) continue;
                         int nidx = np.x + np.y * width;
 
-                        // Cross keeps its existing straight-through behavior:
-                        // a BUS can continue across it on the same axis, but
-                        // the crossing itself does not connect the axes.
+                        // Cross keeps BUS connectivity straight through only
+                        // on the axis touched by this BUS pixel.
                         if (image[nidx].getInk() == Ink::Cross) {
                             np += fourNeighbors[k];
                             if (np.x < 0 || np.x >= width || np.y < 0 || np.y >= height) continue;
@@ -379,9 +424,11 @@ namespace openVCB {
                             if (image[nidx].getInk() != Ink::Bus) continue;
                         }
 
-                        if (image[nidx].getInk() == Ink::Bus) {
+                        Ink neighborInk = image[nidx].getInk();
+                        if (neighborInk == Ink::Bus) {
                             if (!busRegionVisited[nidx]) {
                                 busRegionVisited[nidx] = 1;
+                                busRegionId[nidx] = currentBusRegion;
                                 physicalBusStack.push_back(np);
                             }
                             continue;
@@ -390,11 +437,140 @@ namespace openVCB {
                         int group = indexImage[nidx];
                         if (group < 0 || group >= physicalGroupCount) continue;
                         Ink componentType = std::get<2>(indexDict[group]);
+                        if (setOff(componentType) == Ink::TraceOff) {
+                            if (std::find(traceGroupsInRegion.begin(), traceGroupsInRegion.end(), group) ==
+                                traceGroupsInRegion.end())
+                                traceGroupsInRegion.push_back(group);
+                            continue;
+                        }
                         if (!busMergeType(componentType)) continue;
 
                         int typeKey = static_cast<int>(setOff(componentType));
                         auto inserted = firstGroupByType.emplace(typeKey, group);
                         if (!inserted.second) uniteGroups(inserted.first->second, group);
+                    }
+                }
+                busGroupsByType.push_back(std::move(firstGroupByType));
+                busTraceGroups.push_back(std::move(traceGroupsInRegion));
+            }
+        }
+
+        using GroupsByType = std::unordered_map<int, std::vector<int>>;
+        std::vector<int> tunnelPixelId(width * height, -1);
+        std::vector<GroupsByType> tunnelGroupsByType(tunnelPixels.size());
+        std::vector<std::vector<int>> tunnelSignalGroups(tunnelPixels.size());
+        for (size_t tunnelId = 0; tunnelId < tunnelPixels.size(); ++tunnelId) {
+            const ivec2& tunnelPos = tunnelPixels[tunnelId];
+            tunnelPixelId[tunnelPos.x + tunnelPos.y * width] = static_cast<int>(tunnelId);
+            auto addCandidateGroup = [&](int group) {
+                if (group < 0 || group >= physicalGroupCount) return;
+                Ink componentType = std::get<2>(indexDict[group]);
+                if (!busMergeType(componentType)) return;
+                int typeKey = static_cast<int>(setOff(componentType));
+                auto& groups = tunnelGroupsByType[tunnelId][typeKey];
+                if (std::find(groups.begin(), groups.end(), group) == groups.end())
+                    groups.push_back(group);
+            };
+            auto addCandidateSignalGroup = [&](int group) {
+                if (group < 0 || group >= physicalGroupCount ||
+                    setOff(std::get<2>(indexDict[group])) != Ink::TraceOff) return;
+                auto& groups = tunnelSignalGroups[tunnelId];
+                if (std::find(groups.begin(), groups.end(), group) == groups.end())
+                    groups.push_back(group);
+            };
+
+            for (int k = 0; k < 4; ++k) {
+                ivec2 np = tunnelPos + fourNeighbors[k];
+                if (np.x < 0 || np.x >= width || np.y < 0 || np.y >= height) continue;
+                int nidx = np.x + np.y * width;
+                if (image[nidx].getInk() == Ink::Cross) {
+                    np += fourNeighbors[k];
+                    if (np.x < 0 || np.x >= width || np.y < 0 || np.y >= height) continue;
+                    nidx = np.x + np.y * width;
+                }
+
+                if (image[nidx].getInk() == Ink::Bus) {
+                    int regionId = busRegionId[nidx];
+                    if (regionId >= 0) {
+                        for (const auto& groupByType : busGroupsByType[regionId])
+                            addCandidateGroup(groupByType.second);
+                        for (int group : busTraceGroups[regionId])
+                            addCandidateSignalGroup(group);
+                    }
+                    continue;
+                }
+                addCandidateGroup(indexImage[nidx]);
+                addCandidateSignalGroup(indexImage[nidx]);
+            }
+        }
+
+        // Follow each directed Tunnel ray independently. Only components on
+        // the side that enters the source endpoint are sources; the first
+        // destination endpoint can connect to compatible components around
+        // that endpoint. This prevents unrelated perpendicular contacts from
+        // being merged just because they touch the same Tunnel pixel.
+        for (size_t sourceTunnel = 0; sourceTunnel < tunnelPixels.size(); ++sourceTunnel) {
+            const ivec2& tunnelPos = tunnelPixels[sourceTunnel];
+            for (int k = 0; k < 4; ++k) {
+                ivec2 targetPos = firstTunnelAlong(tunnelPos, fourNeighbors[k]);
+                if (targetPos.x < 0) continue;
+                int targetIdx = targetPos.x + targetPos.y * width;
+                int targetTunnel = tunnelPixelId[targetIdx];
+                if (targetTunnel < 0 || targetTunnel == static_cast<int>(sourceTunnel)) continue;
+
+                // Signal groups join through a Tunnel only from the side that
+                // enters the source endpoint. The destination endpoint can
+                // contribute matching traces or Read/Write groups on any side.
+                ivec2 sourceSide = tunnelPos - fourNeighbors[k];
+                if (sourceSide.x < 0 || sourceSide.x >= width ||
+                    sourceSide.y < 0 || sourceSide.y >= height) continue;
+                int sourceSideIdx = sourceSide.x + sourceSide.y * width;
+                if (image[sourceSideIdx].getInk() == Ink::Cross) {
+                    sourceSide -= fourNeighbors[k];
+                    if (sourceSide.x < 0 || sourceSide.x >= width ||
+                        sourceSide.y < 0 || sourceSide.y >= height) continue;
+                    sourceSideIdx = sourceSide.x + sourceSide.y * width;
+                }
+
+                std::vector<int> sourceComponentGroups;
+                if (image[sourceSideIdx].getInk() == Ink::Bus) {
+                    int regionId = busRegionId[sourceSideIdx];
+                    if (regionId >= 0)
+                        for (const auto& groupByType : busGroupsByType[regionId])
+                            sourceComponentGroups.push_back(groupByType.second);
+                } else {
+                    int group = indexImage[sourceSideIdx];
+                    if (group >= 0 && group < physicalGroupCount &&
+                        busMergeType(std::get<2>(indexDict[group])))
+                        sourceComponentGroups.push_back(group);
+                }
+
+                for (int sourceGroup : sourceComponentGroups) {
+                    int typeKey = static_cast<int>(setOff(std::get<2>(indexDict[sourceGroup])));
+                    auto targetCandidates = tunnelGroupsByType[targetTunnel].find(typeKey);
+                    if (targetCandidates == tunnelGroupsByType[targetTunnel].end()) continue;
+                    for (int targetGroup : targetCandidates->second)
+                        uniteGroups(sourceGroup, targetGroup);
+                }
+
+                std::vector<int> sourceSignalGroups;
+                if (image[sourceSideIdx].getInk() == Ink::Bus) {
+                    int regionId = busRegionId[sourceSideIdx];
+                    if (regionId >= 0) sourceSignalGroups = busTraceGroups[regionId];
+                } else {
+                    int group = indexImage[sourceSideIdx];
+                    if (group >= 0 && group < physicalGroupCount &&
+                        setOff(std::get<2>(indexDict[group])) == Ink::TraceOff)
+                        sourceSignalGroups.push_back(group);
+                }
+
+                for (int sourceGroup : sourceSignalGroups) {
+                    for (int targetGroup : tunnelSignalGroups[targetTunnel]) {
+                        if (sourceGroup == targetGroup) continue;
+                        std::uint64_t sourceMetas = traceMetaByGroup[sourceGroup];
+                        std::uint64_t targetMetas = traceMetaByGroup[targetGroup];
+                        if (sourceMetas && targetMetas && !(sourceMetas & targetMetas)) continue;
+                        uniteGroups(sourceGroup, targetGroup);
                     }
                 }
             }

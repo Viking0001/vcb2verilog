@@ -525,6 +525,112 @@ def main() -> int:
 
     tests.append(("12_bus_preserves_different_gate_types", test_bus_does_not_merge_different_gate_types))
 
+    def test_tunnel_merges_same_type_gates():
+        grid = [
+            ["Latch", "W", "Trace", "R", "AND", "Tunnel", ".", ".", ".", "Tunnel", "AND", "W", "Trace1", "R", "LED"],
+            [".",     ".", ".",     ".", ".",   ".",      ".", ".", ".", ".",      "R",   ".", ".",     ".", "."],
+            ["Latch", "W", "Trace1", "Trace1", "Trace1", "Trace1", "Trace1", "Trace1", "Trace1", "Trace1", "Trace1", ".", ".", ".", "."],
+        ]
+        vcb = os.path.join(TMP_DIR, "tunnel_merge_and.vcb")
+        out_v = os.path.join(TMP_DIR, "tunnel_merge_and.v")
+        build_vcb(grid, vcb)
+        compile_vcb_raw(vcb, out_v)
+        assert count_gate_assignments(out_v, "AND") == 1, "AND-Tunnel-Tunnel-AND musí být jedna logická AND gate"
+        _, inputs, _, _ = parse_ports(out_v)
+        assert len(inputs) == 2, f"Tunelové sloučení ztratilo vstup: {inputs}"
+        run_yosys_check(out_v)
+        table = [((0, 0), (0,)), ((0, 1), (0,)), ((1, 0), (0,)), ((1, 1), (1,))]
+        simulate_comb(out_v, "tunnel_merge_and", table)
+
+    tests.append(("13_tunnel_merges_same_type_gates", test_tunnel_merges_same_type_gates))
+
+    def test_tunnel_merges_adjacent_gate_endpoints():
+        grid = [["AND", "Tunnel", "Tunnel", "AND"]]
+        vcb = os.path.join(TMP_DIR, "tunnel_adjacent_gates.vcb")
+        out_v = os.path.join(TMP_DIR, "tunnel_adjacent_gates.v")
+        build_vcb(grid, vcb)
+        compile_vcb_raw(vcb, out_v)
+        assert count_gate_assignments(out_v, "AND") == 1, "Sousední Tunnel pixely musí být samostatné endpointy"
+
+    tests.append(("14_tunnel_merges_adjacent_gate_endpoints", test_tunnel_merges_adjacent_gate_endpoints))
+
+    def test_tunnel_routes_read_input_to_gate():
+        grid = [
+            ["Latch", "W", "Trace", "R", "Tunnel", ".", "Tunnel", "R", "AND", "W", "Trace1", "R", "LED"],
+            [".", ".", ".", ".", ".", ".", ".", ".", "R", ".", ".", ".", "."],
+            ["Latch", "W", "Trace2", "Trace2", "Trace2", "Trace2", "Trace2", "Trace2", "Trace2", ".", ".", ".", "."],
+        ]
+        vcb = os.path.join(TMP_DIR, "tunnel_read_to_and.vcb")
+        out_v = os.path.join(TMP_DIR, "tunnel_read_to_and.v")
+        build_vcb(grid, vcb)
+        compile_vcb_raw(vcb, out_v)
+        assert count_gate_assignments(out_v, "AND") == 1
+        _, inputs, outputs, _ = parse_ports(out_v)
+        assert len(inputs) == 2 and len(outputs) == 1
+        run_yosys_check(out_v)
+        simulate_comb(out_v, "tunnel_read_to_and", [
+            ((0, 0), (0,)), ((0, 1), (0,)), ((1, 0), (0,)), ((1, 1), (1,)),
+        ])
+
+    tests.append(("15_tunnel_routes_read_into_gate", test_tunnel_routes_read_input_to_gate))
+
+    def test_tunnel_connects_trace_in_all_directions():
+        patterns = {
+            "east": [["Latch", "W", "Trace", "Tunnel", "Tunnel", "Trace", "R", "LED"]],
+            "west": [["LED", "R", "Trace", "Tunnel", "Tunnel", "Trace", "W", "Latch"]],
+            "south": [[token] for token in
+                      ["Latch", "W", "Trace", "Tunnel", "Tunnel", "Trace", "R", "LED"]],
+            "north": [[token] for token in
+                      ["LED", "R", "Trace", "Tunnel", "Tunnel", "Trace", "W", "Latch"]],
+        }
+        for direction, grid in patterns.items():
+            vcb = os.path.join(TMP_DIR, f"tunnel_trace_{direction}.vcb")
+            out_v = os.path.join(TMP_DIR, f"tunnel_trace_{direction}.v")
+            build_vcb(grid, vcb)
+            compile_vcb(vcb, out_v)
+            _, inputs, outputs, _ = parse_ports(out_v)
+            assert len(inputs) == 1 and len(outputs) == 1
+            run_yosys_check(out_v)
+            simulate_comb(out_v, f"tunnel_trace_{direction}", [((0,), (0,)), ((1,), (1,))])
+
+    tests.append(("16_tunnel_routes_trace_in_all_directions", test_tunnel_connects_trace_in_all_directions))
+
+    def test_tunnel_keeps_different_gate_types_separate():
+        grid = [["Latch", "W", "Trace", "R", "AND", "Tunnel", ".", ".", ".", "Tunnel", "OR", "W", "Trace1", "R", "LED"]]
+        vcb = os.path.join(TMP_DIR, "tunnel_different_gates.vcb")
+        out_v = os.path.join(TMP_DIR, "tunnel_different_gates.v")
+        build_vcb(grid, vcb)
+        compile_vcb_raw(vcb, out_v)
+        assert count_gate_assignments(out_v, "AND") == 1, "AND se nesmí změnit na jiný typ"
+        assert count_gate_assignments(out_v, "OR") == 1, "OR se nesmí sloučit s AND"
+        _, _, outputs, _ = parse_ports(out_v)
+        assert len(outputs) == 1, f"Tunelové propojení změnilo výstupy: {outputs}"
+
+    tests.append(("17_tunnel_preserves_different_gate_types", test_tunnel_keeps_different_gate_types_separate))
+
+    def test_tunnel_uses_first_endpoint_without_chaining_empty_tunnels():
+        grid = [["AND", "Tunnel", ".", "Tunnel", ".", "Tunnel", "AND"]]
+        vcb = os.path.join(TMP_DIR, "tunnel_first_endpoint.vcb")
+        out_v = os.path.join(TMP_DIR, "tunnel_first_endpoint.v")
+        build_vcb(grid, vcb)
+        compile_vcb_raw(vcb, out_v)
+        assert count_gate_assignments(out_v, "AND") == 2, "Tunel nesmí přeskočit první prázdný Tunnel endpoint"
+
+    tests.append(("18_tunnel_stops_at_first_endpoint", test_tunnel_uses_first_endpoint_without_chaining_empty_tunnels))
+
+    def test_tunnel_merges_components_through_bus_regions():
+        grid = [[
+            "Latch", "W", "Trace", "R", "AND", "BUS2", "Tunnel",
+            ".", ".", ".", "Tunnel", "BUS2", "AND",
+        ]]
+        vcb = os.path.join(TMP_DIR, "tunnel_bus_merge.vcb")
+        out_v = os.path.join(TMP_DIR, "tunnel_bus_merge.v")
+        build_vcb(grid, vcb)
+        compile_vcb_raw(vcb, out_v)
+        assert count_gate_assignments(out_v, "AND") == 1, "Tunel musí propojit logické komponenty dotýkající se BUS oblastí"
+
+    tests.append(("19_tunnel_merges_through_bus", test_tunnel_merges_components_through_bus_regions))
+
     def test_buffer_dff():
         grid = [
             ["Latch", "W", "Trace", "R", "Buffer", "W", "Trace1", "R", "LED"],
