@@ -8,6 +8,14 @@ FPGA hardware.
 The reader handles the Godot-style and JSON VCB project formats. Circuit layers
 are compressed with Zstandard.
 
+---
+
+> [!WARNING]
+> ### AI Development Disclaimer
+> This project was developed and refactored with the assistance of artificial intelligence (LLM coding agents). While the generated code has been compiled, analyzed, and verified with test projects, **AI can make mistakes**. Circuit designs intended for safety-critical systems or production hardware should always be independently reviewed, simulated (e.g., via Icarus Verilog or Verilator), and validated before deployment on physical silicon.
+
+---
+
 ## Features
 
 - Combinational gates: AND, OR, NOT, NAND, NOR, XOR, and XNOR.
